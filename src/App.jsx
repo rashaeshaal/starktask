@@ -255,14 +255,12 @@ export default function App() {
 
               <div>
                 <h1 className="text-sm sm:text-lg font-bold text-slate-900 flex items-center gap-1.5 sm:gap-2">
-                  <span>SalesDoor Enterprise</span>
+                
                   <span className="text-[9px] sm:text-[10px] bg-[#05331F]/10 text-[#05331F] font-bold px-1.5 sm:px-2 py-0.5 rounded-full">
-                    {activeEmployee.role}
+                   {activeEmployee.fullName || activeEmployee.name}  |  {activeEmployee.role}
                   </span>
                 </h1>
-                <p className="text-[11px] sm:text-xs text-slate-400 hidden sm:block">
-                  Logged in as <span className="font-semibold text-slate-700">{activeEmployee.fullName || activeEmployee.name}</span> ({activeEmployee.email})
-                </p>
+             
               </div>
             </div>
 

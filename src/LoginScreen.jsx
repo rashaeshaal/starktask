@@ -67,9 +67,8 @@ export default function LoginScreen() {
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#05331F] text-white shadow-sm mb-1">
             <Building2 className="w-6 h-6 text-emerald-400" />
           </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[#0F172A] tracking-tight">
-            SalesDoor Enterprise
-          </h1>
+        
+        
           <p className="text-xs sm:text-sm text-[#64748B]">
             Employee Management & Task Portal
           </p>
