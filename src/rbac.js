@@ -13,7 +13,7 @@ export const TASK_STATUSES = {
   ASSIGNED: 'Assigned',
   ACCEPTED: 'Accepted',
   IN_PROGRESS: 'In Progress',
-  PENDING_REVIEW: 'Pending Review', // Submitted for completion approval
+  PENDING_REVIEW: 'Pending Review', // Submitted for completion approval / Waiting for sign-off
   CORRECTION_REQUESTED: 'Correction Requested',
   COMPLETED: 'Completed',
   BLOCKED: 'Blocked',
@@ -40,7 +40,7 @@ export const RECURRING_TYPES = {
 export function canViewTask(user, task, allUsers = []) {
   if (!user || !task) return false;
 
-  // 1. Executive Director & GM have 100% company-wide visibility
+  // 1. Executive Director, Director Operations & GM have 100% company-wide visibility
   if (user.role === 'Executive Director' || user.role === 'Director Operations' || user.role === 'General Manager') {
     return true;
   }
@@ -55,7 +55,7 @@ export function canViewTask(user, task, allUsers = []) {
     return true;
   }
 
-  // 4. Reporting manager of any assignee (Visibility for employee's manager in cross-dept tasks)
+  // 4. Reporting manager of any assignee
   const reportees = getReportees(user.id, allUsers);
   const reporteeIds = reportees.map(r => r.id);
   if (reporteeIds.includes(task.assignedToId)) {
@@ -65,7 +65,14 @@ export function canViewTask(user, task, allUsers = []) {
     return true;
   }
 
-  // 5. Department Manager viewing departmental tasks
+  // 5. Operations Head viewing all operations tasks
+  if (user.role === 'Operations Head') {
+    const tDept = (task.departmentId || task.department || '').toLowerCase();
+    const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+    if (opsDepts.includes(tDept)) return true;
+  }
+
+  // 6. Department Manager viewing departmental tasks
   const userLevel = ROLE_HIERARCHY_LEVELS[user.role] || 99;
   if (userLevel <= 3 && task.departmentId === user.department) {
     return true;
@@ -95,17 +102,82 @@ export function canApproveTask(user, task) {
     return true;
   }
 
-  // Brand Manager can review any task in the Marketing department
+  // Operations Head can approve any task across Operations and its 4 branches
+  if (role === 'Operations Head') {
+    const tDept = (task.departmentId || task.department || '').toLowerCase();
+    const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+    if (opsDepts.includes(tDept)) return true;
+  }
+
+  // Warehouse In-charge can approve tasks in warehouse branch
+  if (role === 'Warehouse In-charge') {
+    const tDept = (task.departmentId || task.department || '').toLowerCase();
+    if (tDept === 'warehouse' || tDept === 'operations') {
+      const isHighPriority = task.priority === 'High' || task.priority === 'Urgent';
+      if (creator === userId || isHighPriority) return true;
+    }
+  }
+
+  // Warehouse Supervisor can approve Loading Staff tasks
+  if (role === 'Warehouse Supervisor') {
+    const tRole = task.assignedToRole || '';
+    if (tRole === 'Loading Staff' || creator === userId) return true;
+  }
+
+  // Transport Manager can approve tasks in transport branch
+  if (role === 'Transport Manager') {
+    const tDept = (task.departmentId || task.department || '').toLowerCase();
+    if (tDept === 'transportation' || tDept === 'operations') {
+      const isHighPriority = task.priority === 'High' || task.priority === 'Urgent';
+      if (creator === userId || isHighPriority) return true;
+    }
+  }
+
+  // Transport Coordinator can approve Driver tasks
+  if (role === 'Transport Coordinator') {
+    const tRole = task.assignedToRole || '';
+    if (tRole === 'Driver' || tRole === 'Delivery Partner' || creator === userId) return true;
+  }
+
+  // Service Manager can approve tasks in service branch
+  if (role === 'Service Manager') {
+    const tDept = (task.departmentId || task.department || '').toLowerCase();
+    if (tDept === 'service' || tDept === 'operations') {
+      const isHighPriority = task.priority === 'High' || task.priority === 'Urgent';
+      if (creator === userId || isHighPriority) return true;
+    }
+  }
+
+  // Service Coordinator can approve Technician tasks
+  if (role === 'Service Coordinator') {
+    const tRole = task.assignedToRole || '';
+    if (tRole === 'Technician' || tRole === 'Service Technician' || creator === userId) return true;
+  }
+
+  // Inventory Supervisor can approve Storekeeper tasks
+  if (role === 'Inventory Supervisor') {
+    const tRole = task.assignedToRole || '';
+    if (tRole === 'Storekeeper' || creator === userId) return true;
+  }
+
+  // Marketing roles
   if (role === 'Brand Manager') {
     const tDept = (task.departmentId || task.department || '').toLowerCase();
     if (tDept === 'marketing') return true;
   }
 
-  // Leads Coordinator can review tasks assigned to Graphic Designer or Photographer
   if (role === 'Leads Coordinator') {
     const tDept = (task.departmentId || task.department || '').toLowerCase();
     const tRole = task.assignedToRole || '';
     if (tDept === 'marketing' && (tRole === 'Graphic Designer' || tRole === 'Photographer' || creator === userId)) {
+      return true;
+    }
+  }
+
+  // Finance & Accounts roles
+  if (role === 'Accounts Manager' || role === 'Accounts Executive') {
+    const tDept = (task.departmentId || task.department || '').toLowerCase();
+    if (tDept === 'finance' || tDept === 'accounts') {
       return true;
     }
   }
@@ -115,9 +187,6 @@ export function canApproveTask(user, task) {
 
 /**
  * Strict Day-Locking Rule for SOP & Company Tasks:
- * Tasks belonging to today (or past days) cannot be edited or modified by employees tomorrow.
- * After 11:59:59 PM of the task date, it is permanently locked and read-only.
- * Only Executive Director, Director Operations, or General Manager can unlock or review past tasks.
  */
 export function isTaskLockedForUser(user, task) {
   if (!task) return false;
@@ -130,16 +199,15 @@ export function isTaskLockedForUser(user, task) {
   const today = new Date().toISOString().split('T')[0];
   const taskDate = task.taskDate || task.dueDate || task.deadlineDate;
 
-  // Any task created for previous dates (before today) is strictly locked!
+  // Any task created for previous dates (before today) is strictly locked
   if (taskDate && taskDate < today) {
-    return true; // Permanently locked for employees past midnight
+    return true;
   }
 
-  // Completed or Cancelled tasks are locked for regular editing (require manager reopen)
+  // Completed or Cancelled tasks are locked for regular editing
   if (task.status === TASK_STATUSES.COMPLETED) {
     return true;
   }
 
   return false;
 }
-

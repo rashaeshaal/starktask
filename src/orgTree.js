@@ -4,10 +4,10 @@
  * - Executive Director → General Manager → Department Heads
  * - HR: HR Manager → Admin Manager, HR Executive; Admin Manager → Admin Executive, IT Head, Housekeeping
  * - Finance: Accounts Manager → Accountant
- * - Operations: Operations Head → Warehouse In-charge, Transport Manager, Service Manager, Inventory Supervisor, Operations Assistant, QC Inspector
+ * - Operations: Operations Head → Warehouse In-charge, Transport Manager, Service Manager, Inventory Supervisor, Operations Assistant
  *   - Warehouse In-charge → Warehouse Supervisor → Loading Staff
- *   - Transport Manager → Transport Coordinator → Driver
- *   - Service Manager → Service Coordinator → Technician
+ *   - Transport Manager → Transport Coordinator → Drivers
+ *   - Service Manager → Service Coordinator → Technicians
  *   - Inventory Supervisor → Storekeeper
  * - Sales: CSO → SSM → ASM → Sales Coordinator
  * - Marketing: Brand Manager → Leads Coordinator → Graphic Designer, Photographer
@@ -95,23 +95,12 @@ export const ORG_TREE = {
       'Transport Manager',
       'Service Manager',
       'Inventory Supervisor',
-      'Operations Assistant',
-      'QC Inspector'
+      'Operations Assistant'
     ]
   },
   'Operations Assistant': {
     department: 'operations',
     level: 4,
-    children: []
-  },
-  'QC Inspector': {
-    department: 'qc',
-    level: 4,
-    children: ['QC Executive']
-  },
-  'QC Executive': {
-    department: 'qc',
-    level: 5,
     children: []
   },
 
@@ -229,164 +218,83 @@ export const ORG_TREE = {
 };
 
 /**
- * Standard list of all 10 departments
+ * 10 Official Company Departments
  */
 export const COMPANY_DEPARTMENTS = [
-  { id: 'management', name: 'Executive Management', code: 'EXEC' },
-  { id: 'hr_admin', name: 'HR & Administration', code: 'HR' },
-  { id: 'finance', name: 'Finance & Accounts', code: 'FIN' },
-  { id: 'sales', name: 'Sales', code: 'SALES' },
-  { id: 'operations', name: 'Operations', code: 'OPS' },
-  { id: 'warehouse', name: 'Warehouse', code: 'WH' },
-  { id: 'qc', name: 'Quality Control (QC)', code: 'QC' },
-  { id: 'transportation', name: 'Transportation', code: 'TRANS' },
-  { id: 'service', name: 'Service', code: 'SERV' },
-  { id: 'inventory', name: 'Inventory', code: 'INV' },
-  { id: 'marketing', name: 'Marketing', code: 'MKT' }
+  { id: 'management', name: 'Executive Management', headRole: 'Executive Director' },
+  { id: 'hr_admin', name: 'HR & Administration', headRole: 'HR Manager' },
+  { id: 'finance', name: 'Finance & Accounts', headRole: 'Accounts Manager' },
+  { id: 'sales', name: 'Sales', headRole: 'Chief Sales Officer' },
+  { id: 'operations', name: 'Operations', headRole: 'Operations Head' },
+  { id: 'warehouse', name: 'Warehouse', headRole: 'Warehouse In-charge' },
+  { id: 'quality_control', name: 'Quality Control (QC)', headRole: 'QC Inspector' },
+  { id: 'transportation', name: 'Transportation', headRole: 'Transport Manager' },
+  { id: 'service', name: 'Service', headRole: 'Service Manager' },
+  { id: 'inventory', name: 'Inventory', headRole: 'Inventory Supervisor' },
+  { id: 'marketing', name: 'Marketing', headRole: 'Brand Manager' }
 ];
 
-/**
- * Normalizes role string to match config key
- */
 export function normalizeRole(role) {
   if (!role) return '';
-  const r = role.trim();
-  if (r === 'Director Operations' || r === 'General Manager') return 'Director Operations';
-  if (r === 'Chief Sales Officer') return 'CSO';
-  if (r === 'Senior Sales Manager') return 'SSM';
-  if (r === 'Area Sales Manager') return 'ASM';
+  const r = String(role).trim();
+  if (r === 'Chief Sales Officer' || r === 'CSO') return 'CSO';
+  if (r === 'State Sales Manager' || r === 'SSM' || r === 'Senior Sales Manager') return 'SSM';
+  if (r === 'Asst Sales Manager' || r === 'Assistant Sales Manager' || r === 'ASM' || r === 'Area Sales Manager') return 'ASM';
+  if (r === 'Delivery Partner') return 'Driver';
+  if (r === 'Service Technician') return 'Technician';
+  if (r === 'Warehouse Executive' || r === 'QC Supervisor' || r === 'Dispatch Supervisor') return 'Warehouse Supervisor';
+  if (r === 'Accounts Executive') return 'Accounts Manager';
+  if (r === 'Junior Accountant') return 'Accountant';
   return r;
 }
 
-/**
- * Returns role hierarchy level (1: Executive Director, 2: GM, 3: Dept Head, 4: Senior/Supervisor, 5: Staff, 6: Crew)
- */
 export function getRoleLevel(role) {
   const norm = normalizeRole(role);
   return ORG_TREE[norm]?.level || 99;
 }
 
-/**
- * Recursively gets all roles that sit underneath `parentRole` in the tree
- */
-export function getDownlineRoles(parentRole) {
-  const norm = normalizeRole(parentRole);
-  const node = ORG_TREE[norm];
-  if (!node || !Array.isArray(node.children)) return [];
-
-  const direct = node.children;
-  let all = [...direct];
-  for (const child of direct) {
-    all = [...all, ...getDownlineRoles(child)];
-  }
-  return Array.from(new Set(all));
+export function isDirectSubordinate(managerRole, memberRole) {
+  const normMgr = normalizeRole(managerRole);
+  const normMember = normalizeRole(memberRole);
+  const node = ORG_TREE[normMgr];
+  if (!node) return false;
+  return node.children.includes(normMember);
 }
 
-/**
- * Strict check: Is `targetRole` in the downline of `parentRole`?
- */
-export function isDownlineRole(parentRole, targetRole, parentDept = null, targetDept = null) {
-  if (!parentRole || !targetRole) return false;
-  const pNorm = normalizeRole(parentRole);
-  const tNorm = normalizeRole(targetRole);
+export function isDescendantRole(ancestorRole, descendantRole) {
+  const normAncestor = normalizeRole(ancestorRole);
+  const normDescendant = normalizeRole(descendantRole);
+  if (normAncestor === normDescendant) return true;
 
-  if (pNorm === tNorm) return false;
+  const visited = new Set();
+  const queue = [...(ORG_TREE[normAncestor]?.children || [])];
 
-  // Executive leadership has universal downline
-  if (pNorm === 'Executive Director' || pNorm === 'Director Operations' || pNorm === 'General Manager') {
-    return true;
-  }
-
-  // Same branch downline check
-  const downline = getDownlineRoles(pNorm);
-  return downline.includes(tNorm);
-}
-
-/**
- * Validates whether a member role can be placed under a leader role in a team
- * Returns { valid: boolean, reason?: string }
- */
-export function validateTeamPlacement(leaderRole, memberRole, teamDepartment = null) {
-  if (!leaderRole || !memberRole) {
-    return { valid: false, reason: 'Both leader and member roles are required.' };
-  }
-
-  const lNorm = normalizeRole(leaderRole);
-  const mNorm = normalizeRole(memberRole);
-
-  if (lNorm === mNorm) {
-    return { valid: false, reason: `A ${memberRole} cannot report to themselves or another ${leaderRole}.` };
-  }
-
-  const lNode = ORG_TREE[lNorm];
-  const mNode = ORG_TREE[mNorm];
-
-  if (!lNode) {
-    return { valid: false, reason: `Unknown leader role "${leaderRole}".` };
-  }
-  if (!mNode) {
-    return { valid: false, reason: `Unknown member role "${memberRole}".` };
-  }
-
-  // Member must be at a lower level (higher number)
-  if (mNode.level <= lNode.level) {
-    return { 
-      valid: false, 
-      reason: `A ${memberRole} (Level ${mNode.level}) cannot report to or be placed under a ${leaderRole} (Level ${lNode.level}).` 
-    };
-  }
-
-  // Must be in downline
-  const downline = getDownlineRoles(lNorm);
-  if (!downline.includes(mNorm)) {
-    return { 
-      valid: false, 
-      reason: `Invalid hierarchy placement: A ${memberRole} does not report under a ${leaderRole} in the company structure.` 
-    };
-  }
-
-  return { valid: true };
-}
-
-/**
- * Roles allowed to act as Leader for a given department
- */
-export function getAllowedLeadersForDepartment(deptId) {
-  if (!deptId) return [];
-  const normalizedDept = deptId.toLowerCase();
-
-  const matching = Object.entries(ORG_TREE)
-    .filter(([role, config]) => {
-      // Management roles can lead any team
-      if (config.department === 'management') return true;
-
-      // Operations head can lead operations, warehouse, transportation, service, inventory, qc
-      if (role === 'Operations Head' && ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'].includes(normalizedDept)) {
-        return true;
-      }
-
-      // Department match and level <= 4 (must be a manager/supervisor role, not frontline staff)
-      const isDept = config.department === normalizedDept || 
-                     (normalizedDept === 'hr_admin' && (config.department === 'hr_admin' || config.department === 'hr')) ||
-                     (normalizedDept === 'operations' && ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'].includes(config.department));
-      
-      return isDept && config.level <= 4 && config.children.length > 0;
-    })
-    .map(([role]) => role);
-
-  return matching;
-}
-
-/**
- * Get parent role for a given role (reportsTo role)
- */
-export function getParentRole(role) {
-  const norm = normalizeRole(role);
-  for (const [pRole, config] of Object.entries(ORG_TREE)) {
-    if (config.children && config.children.includes(norm)) {
-      return pRole;
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === normDescendant) return true;
+    if (!visited.has(current)) {
+      visited.add(current);
+      const nextChildren = ORG_TREE[current]?.children || [];
+      queue.push(...nextChildren);
     }
   }
-  return null;
+
+  return false;
 }
 
+export function getDownlineRoles(role) {
+  const norm = normalizeRole(role);
+  const downline = new Set();
+  const queue = [...(ORG_TREE[norm]?.children || [])];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!downline.has(current)) {
+      downline.add(current);
+      const nextChildren = ORG_TREE[current]?.children || [];
+      queue.push(...nextChildren);
+    }
+  }
+
+  return Array.from(downline);
+}

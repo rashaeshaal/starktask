@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   CheckCircle2, Clock, AlertTriangle, AlertCircle, Calendar, 
   Search, CheckSquare, Square, Eye, Edit3, Trash2, MoreHorizontal,
-  PlusCircle, Filter, X, Check, Loader2
+  PlusCircle, Filter, X, Check, Loader2, Megaphone, GitFork, User,
+  Camera, MapPin, Truck, ExternalLink
 } from 'lucide-react';
 import { TASK_STATUSES, TASK_PRIORITIES, isTaskLockedForUser } from './rbac';
 import { getTodayDateString, getDateOffset } from './dateUtils';
@@ -13,10 +14,6 @@ import { db } from './firebase';
 
 /**
  * Clean Date Formatter:
- * - "Today" if today
- * - "Tomorrow" if tomorrow
- * - "Yesterday" if yesterday
- * - Otherwise "16 Nov 2026"
  */
 function formatCleanDate(dateStr) {
   if (!dateStr) return '';
@@ -47,10 +44,6 @@ function formatCleanDate(dateStr) {
   return String(dateStr);
 }
 
-/**
- * Format Department / Project text:
- * E.g. "HR_ADMIN" -> "HR & Admin", "SALES" -> "Sales"
- */
 function formatDepartmentName(raw) {
   if (!raw) return 'Operations';
   const val = String(raw).trim();
@@ -81,11 +74,29 @@ export default function TaskPulseTeamView({
   loading = false,
   onTaskCreated,
   onTaskUpdated,
-  onOpenTaskDetails
+  onOpenTaskDetails,
+  onOpenAssignModal,
+  onFollowUpTask
 }) {
   const todayStr = getTodayDateString();
+  const userRole = currentUser?.role || '';
+  const currentUserId = currentUser?.id || currentUser?.uid;
 
-  // Date Navigation State: 'today' | 'yesterday' | 'all' | 'custom'
+  const isBrandManager = userRole === 'Brand Manager';
+  const isOperationsHead = userRole === 'Operations Head';
+  const isWarehouseInCharge = userRole === 'Warehouse In-charge';
+  const isTransportManager = userRole === 'Transport Manager';
+  const isServiceManager = userRole === 'Service Manager';
+  const isInventorySupervisor = userRole === 'Inventory Supervisor';
+
+  const isSupervisorOrManager = isOperationsHead || isWarehouseInCharge || isTransportManager || 
+                                isServiceManager || isInventorySupervisor || userRole.includes('Supervisor') || 
+                                userRole.includes('Coordinator') || userRole.includes('Manager');
+
+  // View Mode: 'my_tasks' | 'sales_linked' | 'marketing_requests'
+  const [viewMode, setViewMode] = useState('my_tasks');
+
+  // Date Navigation State
   const [dateFilter, setDateFilter] = useState('today');
   const [selectedDate, setSelectedDate] = useState(todayStr);
 
@@ -98,17 +109,17 @@ export default function TaskPulseTeamView({
   // Mobile Bottom Sheet Filter State
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
 
-  // Overflow menu state: openTaskId
+  // Active overflow menu
   const [activeMenuTaskId, setActiveMenuTaskId] = useState(null);
   const menuRef = useRef(null);
 
   // Modal State: "Add Today's Work"
   const [isAddTodayWorkModalOpen, setIsAddTodayWorkModalOpen] = useState(false);
-
-  // Toast / Feedback message
   const [toastMessage, setToastMessage] = useState(null);
 
-  // Debounce search (250ms)
+  // Photo viewer lightbox
+  const [activePhotoViewer, setActivePhotoViewer] = useState(null);
+
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm);
@@ -116,56 +127,69 @@ export default function TaskPulseTeamView({
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Click outside to dismiss overflow menu
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
+    function handleClickOutside(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
         setActiveMenuTaskId(null);
       }
-    };
-    if (activeMenuTaskId) {
-      document.addEventListener('mousedown', handleClickOutside);
     }
+    document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [activeMenuTaskId]);
+  }, []);
 
-  // Keyboard accessibility: ESC closes modal, mobile filter sheet, or menus
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        if (activeMenuTaskId) setActiveMenuTaskId(null);
-        if (isMobileFilterOpen) setIsMobileFilterOpen(false);
-        if (isAddTodayWorkModalOpen) setIsAddTodayWorkModalOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeMenuTaskId, isMobileFilterOpen, isAddTodayWorkModalOpen]);
-
-  // Auto-clear toast
-  useEffect(() => {
-    if (toastMessage) {
-      const timer = setTimeout(() => setToastMessage(null), 3500);
-      return () => clearTimeout(timer);
-    }
-  }, [toastMessage]);
-
-  const showToast = (text, type = 'error') => {
+  const showToast = (text, type = 'success') => {
     setToastMessage({ text, type });
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
   };
 
-  const currentUserId = currentUser?.id || currentUser?.uid || currentUser?.employeeId;
+  // 1. Linked tasks from Sales (For Warehouse In-charge & Transport Manager)
+  const salesLinkedTasks = useMemo(() => {
+    return tasks.filter(t => {
+      const isSalesWork = t.isLinkedSalesWork || t.taskCategory === 'stark_door_order' || Boolean(t.sourceBookingId) || Boolean(t.bookingId);
+      const isMyDept = isWarehouseInCharge 
+        ? (t.departmentId === 'warehouse' || t.department === 'warehouse')
+        : isTransportManager
+        ? (t.departmentId === 'transportation' || t.department === 'transportation')
+        : false;
+      return isSalesWork && (isMyDept || isOperationsHead);
+    }).sort((a, b) => {
+      // Sort by required-by / deadline date
+      const dateA = a.requiredBy || a.deadlineDate || a.createdAt || '';
+      const dateB = b.requiredBy || b.deadlineDate || b.createdAt || '';
+      return String(dateA).localeCompare(String(dateB));
+    });
+  }, [tasks, isWarehouseInCharge, isTransportManager, isOperationsHead]);
 
-  // Filter tasks belonging to current logged-in user
+  // 2. Incoming Cross-Department Requests for Brand Manager
+  const marketingRequests = useMemo(() => {
+    return tasks.filter(t => {
+      const isReq = t.isMarketingRequest || t.category === 'Marketing Request' || t.taskCategory === 'Marketing Request';
+      const isMktDept = (t.departmentId || t.department || '').toLowerCase() === 'marketing';
+      return isReq || (isMktDept && t.requestedBy != null);
+    });
+  }, [tasks]);
+
+  // 3. User Filtered Tasks
   const userFilteredTasks = useMemo(() => {
     return tasks.filter(task => {
-      // 1. User Filter: Belongs to logged-in user
-      const taskAssigneeId = task.assignedToId || task.assignedTo;
-      const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds : [];
-      const isMine = taskAssigneeId === currentUserId || taskAssigneeIds.includes(currentUserId);
-      if (!isMine) return false;
+      // Tab 1: Sales Linked Tab
+      if (viewMode === 'sales_linked') {
+        const isSalesWork = task.isLinkedSalesWork || task.taskCategory === 'stark_door_order' || Boolean(task.sourceBookingId) || Boolean(task.bookingId);
+        if (!isSalesWork) return false;
+      } else if (viewMode === 'marketing_requests') {
+        const isReq = task.isMarketingRequest || task.category === 'Marketing Request' || (task.departmentId === 'marketing' && task.requestedBy != null);
+        if (!isReq) return false;
+      } else {
+        // Standard My Tasks view
+        const taskAssigneeId = task.assignedToId || task.assignedTo;
+        const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds : [];
+        const isMine = taskAssigneeId === currentUserId || taskAssigneeIds.includes(currentUserId);
+        if (!isMine) return false;
+      }
 
-      // 2. Date Filter
+      // Date Filter
       const taskDateVal = task.date || task.taskDate || task.deadlineDate;
       if (dateFilter === 'today') {
         const matchesDate = taskDateVal === todayStr || task.deadlineDate === todayStr;
@@ -179,7 +203,7 @@ export default function TaskPulseTeamView({
         if (!matchesDate) return false;
       }
 
-      // 3. Status Filter
+      // Status Filter
       if (statusFilter !== 'all') {
         if (statusFilter === 'overdue') {
           if (!(task.deadlineDate < todayStr && task.status !== TASK_STATUSES.COMPLETED)) return false;
@@ -188,24 +212,30 @@ export default function TaskPulseTeamView({
         }
       }
 
-      // 4. Priority Filter
+      // Priority Filter
       if (priorityFilter !== 'all') {
         const pNorm = String(task.priority || '').toLowerCase();
         if (pNorm !== priorityFilter.toLowerCase()) return false;
       }
 
-      // 5. Search Text Filter (Debounced)
+      // Search Query
       if (debouncedSearch.trim()) {
         const query = debouncedSearch.toLowerCase();
         const matchTitle = (task.title || '').toLowerCase().includes(query);
         const matchDesc = (task.description || '').toLowerCase().includes(query);
-        const matchDept = (task.projectDept || task.department || task.departmentId || '').toLowerCase().includes(query);
-        if (!matchTitle && !matchDesc && !matchDept) return false;
+        const matchDealer = (task.dealerName || '').toLowerCase().includes(query);
+        const matchRef = (task.reference || '').toLowerCase().includes(query);
+        const matchLoc = (task.location || '').toLowerCase().includes(query);
+        if (!matchTitle && !matchDesc && !matchDealer && !matchRef && !matchLoc) return false;
       }
 
       return true;
     }).sort((a, b) => {
-      // Completed at bottom, then newest
+      if (viewMode === 'sales_linked') {
+        const dateA = a.requiredBy || a.deadlineDate || '';
+        const dateB = b.requiredBy || b.deadlineDate || '';
+        return String(dateA).localeCompare(String(dateB));
+      }
       const aDone = a.status === TASK_STATUSES.COMPLETED;
       const bDone = b.status === TASK_STATUSES.COMPLETED;
       if (aDone !== bDone) return aDone ? 1 : -1;
@@ -213,9 +243,8 @@ export default function TaskPulseTeamView({
       const dateB = b.date || b.taskDate || b.createdAt || '';
       return String(dateB).localeCompare(String(dateA));
     });
-  }, [tasks, currentUserId, dateFilter, todayStr, selectedDate, statusFilter, priorityFilter, debouncedSearch]);
+  }, [tasks, viewMode, currentUserId, dateFilter, todayStr, selectedDate, statusFilter, priorityFilter, debouncedSearch]);
 
-  // Today's total count for subtitle
   const todayCount = useMemo(() => {
     return tasks.filter(task => {
       const taskAssigneeId = task.assignedToId || task.assignedTo;
@@ -227,8 +256,13 @@ export default function TaskPulseTeamView({
     }).length;
   }, [tasks, currentUserId, todayStr]);
 
-  // Subtitle text (Never says "undefined")
   const subtitleCountText = useMemo(() => {
+    if (viewMode === 'sales_linked') {
+      return `${salesLinkedTasks.length} linked dispatch orders from Sales`;
+    }
+    if (viewMode === 'marketing_requests') {
+      return `${marketingRequests.length} incoming cross-department requests`;
+    }
     if (dateFilter === 'today') {
       return `${todayCount} ${todayCount === 1 ? 'task today' : 'tasks today'}`;
     }
@@ -239,22 +273,22 @@ export default function TaskPulseTeamView({
       return `${userFilteredTasks.length} ${userFilteredTasks.length === 1 ? 'task on date' : 'tasks on date'}`;
     }
     return `${userFilteredTasks.length} ${userFilteredTasks.length === 1 ? 'task in total' : 'tasks in total'}`;
-  }, [dateFilter, todayCount, userFilteredTasks.length]);
+  }, [viewMode, salesLinkedTasks.length, marketingRequests.length, dateFilter, todayCount, userFilteredTasks.length]);
 
-  // Optimistic Toggle Task Done
+  // Toggle Complete / Sign-Off
   const handleToggleTaskComplete = async (task, e) => {
     e?.stopPropagation();
 
     const locked = isTaskLockedForUser(currentUser, task);
     if (locked) {
-      showToast('This task is locked and historical records cannot be modified.');
+      showToast('This task is locked and historical records cannot be modified.', 'error');
       return;
     }
 
     const prevStatus = task.status;
     const prevProgress = task.progressPercentage || 0;
     const isCompleted = prevStatus === TASK_STATUSES.COMPLETED;
-    const nextStatus = isCompleted ? TASK_STATUSES.IN_PROGRESS : TASK_STATUSES.COMPLETED;
+    const nextStatus = isCompleted ? TASK_STATUSES.IN_PROGRESS : TASK_STATUSES.PENDING_REVIEW;
     const nextProgress = isCompleted ? 50 : 100;
 
     const optimisticTask = {
@@ -263,10 +297,8 @@ export default function TaskPulseTeamView({
       progressPercentage: nextProgress
     };
 
-    // 1. Optimistic UI update
     if (onTaskUpdated) onTaskUpdated(optimisticTask);
 
-    // 2. Persist to Firestore
     try {
       await updateFirestoreTask(task.id, {
         status: nextStatus,
@@ -276,7 +308,6 @@ export default function TaskPulseTeamView({
       }, currentUser);
     } catch (err) {
       console.error('Failed to update task status:', err);
-      // Rollback on error
       if (onTaskUpdated) {
         onTaskUpdated({
           ...task,
@@ -284,7 +315,7 @@ export default function TaskPulseTeamView({
           progressPercentage: prevProgress
         });
       }
-      showToast('Failed to update task status. Changes rolled back.');
+      showToast('Failed to update task status.', 'error');
     }
   };
 
@@ -295,639 +326,744 @@ export default function TaskPulseTeamView({
 
     const locked = isTaskLockedForUser(currentUser, task);
     if (locked) {
-      showToast('Action Denied: Historical locked tasks cannot be deleted.');
+      showToast('Action Denied: Locked tasks cannot be deleted.', 'error');
       return;
     }
 
-    if (!confirm(`Are you sure you want to delete "${task.title}"?`)) return;
+    if (!window.confirm(`Delete "${task.title}"?`)) return;
 
     try {
       await deleteDoc(doc(db, 'tasks', task.id));
-      showToast('Task deleted successfully.', 'success');
+      showToast('Task deleted successfully');
     } catch (err) {
-      console.error('Delete task error:', err);
-      showToast(err.message || 'Failed to delete task.');
+      console.error('Delete error:', err);
+      showToast('Failed to delete task', 'error');
     }
   };
 
-  // Status Badge Component (Soft-tinted pills, no dark filled backgrounds)
+  // Subtask Split for Downline
+  const handleSplitTask = (parentTask, e) => {
+    e?.stopPropagation();
+    setActiveMenuTaskId(null);
+    if (onOpenAssignModal) {
+      onOpenAssignModal({
+        parentTaskId: parentTask.id,
+        parentTitle: parentTask.title,
+        title: `Subtask: ${parentTask.title}`,
+        description: `Split from: ${parentTask.title}\nBrief: ${parentTask.description || ''}`,
+        priority: parentTask.priority || TASK_PRIORITIES.MEDIUM,
+        department: parentTask.department || 'operations',
+        reference: parentTask.reference || null,
+        location: parentTask.location || null
+      });
+    }
+  };
+
   const renderStatusBadge = (status) => {
-    if (status === TASK_STATUSES.COMPLETED) {
+    const s = status || TASK_STATUSES.ASSIGNED;
+    if (s === TASK_STATUSES.COMPLETED || s === 'Completed') {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-[#10B981] border border-emerald-200">
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
           Completed
         </span>
       );
     }
-    if (status === TASK_STATUSES.IN_PROGRESS) {
+    if (s === TASK_STATUSES.PENDING_REVIEW || s === 'In Review') {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-          In progress
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200">
+          In review
         </span>
       );
     }
-    if (status === TASK_STATUSES.BLOCKED) {
+    if (s === 'Correction Requested' || s === 'Changes Requested') {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200">
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300">
+          Changes requested
+        </span>
+      );
+    }
+    if (s === TASK_STATUSES.BLOCKED || s === 'Blocked') {
+      return (
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-800 border border-rose-200">
           Blocked
         </span>
       );
     }
-    if (status === TASK_STATUSES.PENDING_REVIEW) {
+    if (s === TASK_STATUSES.IN_PROGRESS || s === 'In Progress') {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-          Review
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-800 border border-sky-200">
+          In progress
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+      <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
         Pending
       </span>
     );
   };
 
-  // Priority Badge Component
   const renderPriorityBadge = (priority) => {
-    const p = String(priority || 'Medium').toLowerCase();
-    if (p === 'urgent' || p === 'critical' || p === 'high') {
+    const p = String(priority || '').toLowerCase();
+    if (p === 'urgent' || p === 'critical') {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200">
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+          Critical
+        </span>
+      );
+    }
+    if (p === 'high') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
           High
         </span>
       );
     }
     if (p === 'low') {
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-50 text-slate-600 border border-slate-200">
           Low
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
         Medium
       </span>
     );
   };
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12 font-sans select-none">
-      
-      {/* Toast Notification Banner */}
-      {toastMessage && (
-        <div 
-          className={`fixed top-4 right-4 z-50 p-3.5 rounded-2xl shadow-lg border text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-3 ${
-            toastMessage.type === 'success' 
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
-              : 'bg-rose-50 border-rose-200 text-rose-900'
-          }`}
-        >
-          {toastMessage.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" />
-          ) : (
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-          )}
-          <span>{toastMessage.text}</span>
-          <button 
-            onClick={() => setToastMessage(null)}
-            className="p-1 rounded-lg hover:bg-black/5 ml-2"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* 1. PAGE HEADER (No card box) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-[#05331F] tracking-tight">
-            My Tasks
-          </h1>
-          <p className="text-sm text-slate-500">
-            {subtitleCountText}
-          </p>
-        </div>
-
-        {/* Primary Action Button: "Add today's work" */}
-        <button
-          type="button"
-          onClick={() => setIsAddTodayWorkModalOpen(true)}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] active:bg-[#032214] text-white text-xs font-semibold shadow-xs transition-all cursor-pointer self-start sm:self-auto min-h-[44px]"
-          title="Record what you did today"
-        >
-          <PlusCircle className="w-4 h-4 text-emerald-300" />
-          <span>Add today's work</span>
-        </button>
-      </div>
-
-      {/* MAIN CARD CONTAINER */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+    <>
+      <div className="space-y-4">
         
-        {/* 2. SINGLE TOOLBAR ROW */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-          
-          {/* Left: Segmented date control + compact date picker button */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <div className="inline-flex p-1 bg-slate-100 rounded-xl">
-              <button
-                type="button"
-                onClick={() => { setDateFilter('today'); setSelectedDate(todayStr); }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-h-[36px] sm:min-h-0 ${
-                  dateFilter === 'today'
-                    ? 'bg-[#05331F] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => { setDateFilter('yesterday'); setSelectedDate(getDateOffset(-1)); }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-h-[36px] sm:min-h-0 ${
-                  dateFilter === 'yesterday'
-                    ? 'bg-[#05331F] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Yesterday
-              </button>
-              <button
-                type="button"
-                onClick={() => setDateFilter('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-h-[36px] sm:min-h-0 ${
-                  dateFilter === 'all'
-                    ? 'bg-[#05331F] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                All dates
-              </button>
-            </div>
-
-            {/* Compact date picker */}
-            <div className="relative inline-flex items-center">
-              <label 
-                htmlFor="customDatePicker" 
-                className={`p-2 rounded-xl border text-xs font-medium cursor-pointer transition flex items-center gap-1.5 min-h-[40px] sm:min-h-0 ${
-                  dateFilter === 'custom' 
-                    ? 'bg-emerald-50 border-emerald-300 text-[#05331F]' 
-                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
-                title="Select specific date"
-              >
-                <Calendar className="w-4 h-4 text-slate-500" />
-                <span className="hidden sm:inline">
-                  {dateFilter === 'custom' ? formatCleanDate(selectedDate) : 'Date'}
-                </span>
-              </label>
-              <input
-                id="customDatePicker"
-                type="date"
-                value={selectedDate}
-                onChange={(e) => {
-                  setSelectedDate(e.target.value);
-                  setDateFilter('custom');
-                }}
-                className="sr-only"
-              />
-            </div>
-          </div>
-
-          {/* Right: Search Input + Status & Priority Filter Dropdowns (Desktop) / Filter Button (Mobile) */}
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            
-            {/* Search Input (Full width on mobile) */}
-            <div className="relative flex-1 md:w-56">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search tasks..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#05331F]/20 min-h-[44px] md:min-h-0"
-                aria-label="Search tasks"
-              />
-            </div>
-
-            {/* Desktop Status & Priority Filter Dropdowns */}
-            <div className="hidden md:flex items-center gap-2">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[#05331F]/20 cursor-pointer"
-                aria-label="Filter by status"
-              >
-                <option value="all">Status: All</option>
-                <option value={TASK_STATUSES.ASSIGNED}>Pending</option>
-                <option value={TASK_STATUSES.IN_PROGRESS}>In progress</option>
-                <option value={TASK_STATUSES.PENDING_REVIEW}>Pending review</option>
-                <option value={TASK_STATUSES.COMPLETED}>Completed</option>
-                <option value={TASK_STATUSES.BLOCKED}>Blocked</option>
-                <option value="overdue">Overdue</option>
-              </select>
-
-              <select
-                value={priorityFilter}
-                onChange={(e) => setPriorityFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[#05331F]/20 cursor-pointer"
-                aria-label="Filter by priority"
-              >
-                <option value="all">Priority: All</option>
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-                <option value="Urgent">Urgent</option>
-              </select>
-            </div>
-
-            {/* Mobile Filter Button (Collapsed into bottom sheet trigger) */}
-            <button
-              type="button"
-              onClick={() => setIsMobileFilterOpen(true)}
-              className="md:hidden p-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 flex items-center justify-center min-h-[44px] min-w-[44px] shrink-0"
-              title="Open filters"
-              aria-label="Open filters"
+        {/* Toast Notification */}
+        {toastMessage && (
+          <div 
+            className={`fixed top-4 right-4 z-50 p-3.5 rounded-2xl shadow-lg border text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-3 ${
+              toastMessage.type === 'success' 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                : 'bg-rose-50 border-rose-200 text-rose-900'
+            }`}
+          >
+            {toastMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{toastMessage.text}</span>
+            <button 
+              onClick={() => setToastMessage(null)}
+              className="p-1 rounded-lg hover:bg-black/5 ml-2 min-h-[36px] min-w-[36px] flex items-center justify-center"
             >
-              <Filter className="w-4 h-4" />
-            </button>
-
-          </div>
-
-        </div>
-
-        {/* 3. TASK LIST VIEW */}
-        {loading ? (
-          /* SKELETON LOADING STATE */
-          <div className="p-6 space-y-4 animate-pulse">
-            {[1, 2, 3, 4, 5].map(i => (
-              <div key={i} className="flex items-center gap-4 py-3 border-b border-slate-100 last:border-0">
-                <div className="w-5 h-5 bg-slate-200 rounded" />
-                <div className="flex-1 space-y-1.5">
-                  <div className="h-4 w-48 bg-slate-200 rounded" />
-                  <div className="h-3 w-72 bg-slate-100 rounded" />
-                </div>
-                <div className="h-5 w-20 bg-slate-100 rounded-full" />
-                <div className="h-5 w-16 bg-slate-100 rounded-full" />
-                <div className="h-8 w-8 bg-slate-100 rounded-lg" />
-              </div>
-            ))}
-          </div>
-        ) : userFilteredTasks.length === 0 ? (
-          /* 4. EMPTY STATE */
-          <div className="p-12 text-center space-y-3">
-            <Clock className="w-10 h-10 mx-auto text-slate-300" />
-            <div>
-              <p className="text-sm font-semibold text-slate-800">No tasks for this day</p>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Record your accomplishments or assign yourself a task to get started.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsAddTodayWorkModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white text-xs font-semibold shadow-xs transition cursor-pointer min-h-[44px]"
-            >
-              <PlusCircle className="w-4 h-4 text-emerald-400" />
-              <span>Add today's work</span>
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
-        ) : (
-          <>
-            {/* DESKTOP & TABLET TABLE (No horizontal scroll at 1024px and above) */}
-            <div className="hidden md:block">
-              <table className="w-full text-left text-xs table-fixed">
-                <thead>
-                  <tr className="border-b border-slate-100 text-slate-400 text-xs">
-                    <th className="py-3 px-3 w-10 text-center font-medium">Done</th>
-                    <th className="py-3 px-3 font-medium w-[40%]">Task</th>
-                    {dateFilter === 'all' && (
-                      <th className="py-3 px-3 font-medium w-24">Date</th>
-                    )}
-                    <th className="py-3 px-3 font-medium w-28 hidden lg:table-cell">Project</th>
-                    <th className="py-3 px-3 font-medium w-20">Priority</th>
-                    <th className="py-3 px-3 font-medium w-24">Deadline</th>
-                    <th className="py-3 px-3 font-medium w-24">Status</th>
-                    <th className="py-3 px-3 font-medium w-16 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {userFilteredTasks.map(task => {
-                    const isCompleted = task.status === TASK_STATUSES.COMPLETED;
-                    const locked = isTaskLockedForUser(currentUser, task);
-                    const isOverdue = task.deadlineDate < todayStr && !isCompleted;
-                    const hasAssigner = task.createdByName && task.createdByName !== (task.assignedEmployee || task.assignedToName);
-
-                    return (
-                      <tr
-                        key={task.id}
-                        onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
-                        className={`hover:bg-slate-50/80 transition-colors cursor-pointer group ${
-                          isCompleted ? 'bg-slate-50/40 text-slate-400' : ''
-                        }`}
-                      >
-                        {/* 1. Checkbox (Done) */}
-                        <td 
-                          className="py-2.5 px-3 text-center align-middle"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => handleToggleTaskComplete(task, e)}
-                            title={locked ? "Task is locked" : isCompleted ? "Mark incomplete" : "Mark complete"}
-                            aria-label={isCompleted ? "Mark task incomplete" : "Mark task complete"}
-                            className="p-1 rounded-lg transition-transform active:scale-90 text-slate-400 hover:text-[#05331F] focus:outline-none cursor-pointer"
-                          >
-                            {isCompleted ? (
-                              <CheckSquare className="w-4 h-4 text-[#10B981]" />
-                            ) : (
-                              <Square className="w-4 h-4 text-slate-400 hover:text-slate-600" />
-                            )}
-                          </button>
-                        </td>
-
-                        {/* 2. Task (Title + truncated 1-line description + optional From: Name) */}
-                        <td className="py-2.5 px-3 align-middle pr-4 min-w-0">
-                          <div className={`font-medium truncate ${
-                            isCompleted ? 'line-through text-slate-400' : 'text-slate-900'
-                          }`}>
-                            {task.title}
-                          </div>
-                          {task.description && (
-                            <div className="text-slate-500 text-[11px] truncate">
-                              {task.description}
-                            </div>
-                          )}
-                          {hasAssigner && (
-                            <div className="text-[10px] text-slate-400 truncate">
-                              From: {task.createdByName.split(' ')[0]}
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Date (Only under "All dates") */}
-                        {dateFilter === 'all' && (
-                          <td className="py-2.5 px-3 align-middle text-slate-500 whitespace-nowrap">
-                            {formatCleanDate(task.date || task.taskDate)}
-                          </td>
-                        )}
-
-                        {/* 3. Project / Dept (Hidden on tablet, shown on lg) */}
-                        <td className="py-2.5 px-3 align-middle text-slate-500 truncate hidden lg:table-cell">
-                          {formatDepartmentName(task.projectDept || task.department || task.departmentId)}
-                        </td>
-
-                        {/* 4. Priority */}
-                        <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                          {renderPriorityBadge(task.priority)}
-                        </td>
-
-                        {/* 5. Deadline (Turns red if overdue) */}
-                        <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                          <span className={`text-[11px] ${
-                            isOverdue ? 'text-rose-600 font-semibold' : 'text-slate-500'
-                          }`}>
-                            {formatCleanDate(task.deadlineDate || task.date || task.taskDate)}
-                          </span>
-                        </td>
-
-                        {/* 6. Status */}
-                        <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                          {renderStatusBadge(task.status)}
-                        </td>
-
-                        {/* 7. Action column (Execute check/pencil + overflow menu) */}
-                        <td 
-                          className="py-2.5 px-3 align-middle text-right whitespace-nowrap"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div className="flex items-center justify-end gap-1 relative">
-                            {/* Primary Action Button (Check or Pencil) */}
-                            <button
-                              type="button"
-                              onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
-                              title={isCompleted ? "View task details" : "Execute task"}
-                              aria-label={isCompleted ? "View details" : "Execute task"}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-[#05331F] hover:bg-slate-100 transition cursor-pointer"
-                            >
-                              {isCompleted ? <Check className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
-                            </button>
-
-                            {/* Overflow Menu (⋯) */}
-                            <button
-                              type="button"
-                              onClick={() => setActiveMenuTaskId(activeMenuTaskId === task.id ? null : task.id)}
-                              aria-label="More actions"
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
-                            >
-                              <MoreHorizontal className="w-3.5 h-3.5" />
-                            </button>
-
-                            {/* Dropdown Menu */}
-                            {activeMenuTaskId === task.id && (
-                              <div
-                                ref={menuRef}
-                                className="absolute right-0 top-8 z-30 w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1 text-left text-xs animate-in fade-in zoom-in-95 duration-100"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveMenuTaskId(null);
-                                    if (onOpenTaskDetails) onOpenTaskDetails(task);
-                                  }}
-                                  className="w-full px-3 py-1.5 hover:bg-slate-50 text-slate-700 flex items-center gap-2 cursor-pointer"
-                                >
-                                  <Eye className="w-3.5 h-3.5 text-slate-400" />
-                                  <span>View & Edit</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleDeleteTask(task, e)}
-                                  className="w-full px-3 py-1.5 hover:bg-rose-50 text-rose-600 flex items-center gap-2 cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                  <span>Delete</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </td>
-
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* MOBILE STACKED CARDS VIEW (Below 768px, 44px tap targets, zero horizontal scroll) */}
-            <div className="md:hidden divide-y divide-slate-100">
-              {userFilteredTasks.map(task => {
-                const isCompleted = task.status === TASK_STATUSES.COMPLETED;
-                const locked = isTaskLockedForUser(currentUser, task);
-                const isOverdue = task.deadlineDate < todayStr && !isCompleted;
-                const hasAssigner = task.createdByName && task.createdByName !== (task.assignedEmployee || task.assignedToName);
-
-                return (
-                  <div
-                    key={task.id}
-                    onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
-                    className="p-4 space-y-2.5 active:bg-slate-50/80 transition-colors cursor-pointer min-h-[44px]"
-                  >
-                    {/* Header: Checkbox + Title */}
-                    <div className="flex items-start gap-2.5">
-                      <button
-                        type="button"
-                        onClick={(e) => handleToggleTaskComplete(task, e)}
-                        title={locked ? "Task is locked" : isCompleted ? "Mark incomplete" : "Mark complete"}
-                        aria-label={isCompleted ? "Mark task incomplete" : "Mark task complete"}
-                        className="p-1 -ml-1 text-slate-400 hover:text-[#05331F] min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0 cursor-pointer"
-                      >
-                        {isCompleted ? (
-                          <CheckSquare className="w-5 h-5 text-[#10B981]" />
-                        ) : (
-                          <Square className="w-5 h-5 text-slate-400" />
-                        )}
-                      </button>
-
-                      <div className="min-w-0 flex-1 pt-1">
-                        <h4 className={`text-xs font-semibold leading-snug line-clamp-2 ${
-                          isCompleted ? 'line-through text-slate-400' : 'text-slate-900'
-                        }`}>
-                          {task.title}
-                        </h4>
-                        {task.description && (
-                          <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
-                            {task.description}
-                          </p>
-                        )}
-                        {hasAssigner && (
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            From: {task.createdByName.split(' ')[0]}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Footer Row: Status Pill, Priority Pill, Deadline */}
-                    <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-50 flex-wrap gap-2 pl-9">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {renderStatusBadge(task.status)}
-                        {renderPriorityBadge(task.priority)}
-                      </div>
-
-                      <span className={`text-[11px] font-medium ${
-                        isOverdue ? 'text-rose-600 font-semibold' : 'text-slate-500'
-                      }`}>
-                        {formatCleanDate(task.deadlineDate || task.date || task.taskDate)}
-                      </span>
-                    </div>
-
-                  </div>
-                );
-              })}
-            </div>
-          </>
         )}
 
-      </div>
+        {/* 1. PAGE HEADER */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-semibold text-[#05331F] tracking-tight">
+                {viewMode === 'sales_linked' 
+                  ? 'Orders from Sales' 
+                  : viewMode === 'marketing_requests' 
+                  ? 'Marketing Requests' 
+                  : 'My Tasks'}
+              </h1>
 
-      {/* MOBILE BOTTOM SHEET FOR FILTERS */}
-      {isMobileFilterOpen && (
-        <div 
-          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end justify-center md:hidden"
-          onClick={() => setIsMobileFilterOpen(false)}
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="w-full bg-white rounded-t-3xl p-5 space-y-4 max-h-[80vh] overflow-y-auto safe-pb animate-in slide-in-from-bottom duration-200"
+              {/* Tab Toggles for Operations Leadership & Marketing */}
+              <div className="flex items-center p-0.5 bg-slate-200 rounded-xl ml-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('my_tasks')}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition min-h-[36px] ${
+                    viewMode === 'my_tasks' ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  My Work
+                </button>
+
+                {(isWarehouseInCharge || isTransportManager || isOperationsHead) && (
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('sales_linked')}
+                    className={`px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 min-h-[36px] ${
+                      viewMode === 'sales_linked' ? 'bg-[#05331F] text-white shadow-2xs font-bold' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>From Sales</span>
+                    {salesLinkedTasks.length > 0 && (
+                      <span className="text-[10px] bg-emerald-400 text-[#05331F] font-bold px-1.5 py-0.2 rounded-full">
+                        {salesLinkedTasks.length}
+                      </span>
+                    )}
+                  </button>
+                )}
+
+                {isBrandManager && (
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('marketing_requests')}
+                    className={`px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1 min-h-[36px] ${
+                      viewMode === 'marketing_requests' ? 'bg-[#05331F] text-white shadow-2xs font-bold' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Megaphone className="w-3 h-3" />
+                    <span>Requests</span>
+                    {marketingRequests.length > 0 && (
+                      <span className="text-[10px] bg-emerald-400 text-[#05331F] font-bold px-1.5 py-0.2 rounded-full">
+                        {marketingRequests.length}
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="text-sm text-slate-500">
+              {subtitleCountText}
+            </p>
+          </div>
+
+          {/* Primary Action Button: "Add today's work" */}
+          <button
+            type="button"
+            onClick={() => setIsAddTodayWorkModalOpen(true)}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] active:bg-[#032214] text-white text-xs font-semibold shadow-xs transition-all cursor-pointer self-start sm:self-auto min-h-[48px]"
+            title="Record what you did today"
           >
-            <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-              <h3 className="text-sm font-semibold text-slate-900">Filter Tasks</h3>
-              <button 
-                onClick={() => setIsMobileFilterOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 min-h-[44px] min-w-[44px] flex items-center justify-center"
-              >
-                <X className="w-5 h-5" />
-              </button>
+            <PlusCircle className="w-4 h-4 text-emerald-300" />
+            <span>Add today's work</span>
+          </button>
+        </div>
+
+        {/* MAIN CARD CONTAINER */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          
+          {/* TOOLBAR */}
+          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            
+            {/* Date buttons */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="inline-flex p-1 bg-slate-100 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => { setDateFilter('today'); setSelectedDate(todayStr); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-h-[40px] ${
+                    dateFilter === 'today' ? 'bg-[#05331F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDateFilter('yesterday'); setSelectedDate(getDateOffset(-1)); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-h-[40px] ${
+                    dateFilter === 'yesterday' ? 'bg-[#05331F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Yesterday
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDateFilter('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer min-h-[40px] ${
+                    dateFilter === 'all' ? 'bg-[#05331F] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All dates
+                </button>
+              </div>
+
+              <div className="relative inline-flex items-center">
+                <label 
+                  htmlFor="customDatePicker" 
+                  className={`p-2 rounded-xl border text-xs font-medium cursor-pointer transition flex items-center gap-1.5 min-h-[40px] ${
+                    dateFilter === 'custom' 
+                      ? 'bg-emerald-50 border-emerald-300 text-[#05331F]' 
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                  title="Select specific date"
+                >
+                  <Calendar className="w-4 h-4 text-slate-500" />
+                  <span className="hidden sm:inline">
+                    {dateFilter === 'custom' ? formatCleanDate(selectedDate) : 'Date'}
+                  </span>
+                </label>
+                <input
+                  id="customDatePicker"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    setSelectedDate(e.target.value);
+                    setDateFilter('custom');
+                  }}
+                  className="sr-only"
+                />
+              </div>
             </div>
 
-            {/* Status Filter */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700">Status</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none min-h-[44px]"
-              >
-                <option value="all">All statuses</option>
-                <option value={TASK_STATUSES.ASSIGNED}>Pending</option>
-                <option value={TASK_STATUSES.IN_PROGRESS}>In progress</option>
-                <option value={TASK_STATUSES.PENDING_REVIEW}>Pending review</option>
-                <option value={TASK_STATUSES.COMPLETED}>Completed</option>
-                <option value={TASK_STATUSES.BLOCKED}>Blocked</option>
-                <option value="overdue">Overdue</option>
-              </select>
-            </div>
+            {/* Search Input & Dropdowns */}
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <div className="relative flex-1 md:w-56">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder={viewMode === 'sales_linked' ? "Search dealer or order..." : "Search tasks..."}
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#05331F]/20 min-h-[44px] md:min-h-0"
+                  aria-label="Search tasks"
+                />
+              </div>
 
-            {/* Priority Filter */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700">Priority</label>
-              <select
-                value={priorityFilter}
-                onChange={(e) => setPriorityFilter(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none min-h-[44px]"
-              >
-                <option value="all">All priorities</option>
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-                <option value="Urgent">Urgent</option>
-              </select>
-            </div>
+              <div className="hidden md:flex items-center gap-2">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[#05331F]/20 cursor-pointer min-h-[40px]"
+                >
+                  <option value="all">Status: All</option>
+                  <option value={TASK_STATUSES.ASSIGNED}>Pending</option>
+                  <option value={TASK_STATUSES.IN_PROGRESS}>In progress</option>
+                  <option value={TASK_STATUSES.PENDING_REVIEW}>In review</option>
+                  <option value="Correction Requested">Changes requested</option>
+                  <option value={TASK_STATUSES.COMPLETED}>Completed</option>
+                  <option value={TASK_STATUSES.BLOCKED}>Blocked</option>
+                  <option value="overdue">Overdue</option>
+                </select>
 
-            {/* Reset & Apply */}
-            <div className="flex items-center gap-2 pt-2">
+                <select
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[#05331F]/20 cursor-pointer min-h-[40px]"
+                >
+                  <option value="all">Priority: All</option>
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                  <option value="Urgent">Critical</option>
+                </select>
+              </div>
+
               <button
                 type="button"
-                onClick={() => {
-                  setStatusFilter('all');
-                  setPriorityFilter('all');
-                  setIsMobileFilterOpen(false);
-                }}
-                className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 min-h-[44px]"
+                onClick={() => setIsMobileFilterOpen(true)}
+                className="md:hidden p-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 flex items-center justify-center min-h-[44px] min-w-[44px] shrink-0"
               >
-                Reset
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsMobileFilterOpen(false)}
-                className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-[#05331F] text-white min-h-[44px]"
-              >
-                Apply
+                <Filter className="w-4 h-4" />
               </button>
             </div>
 
           </div>
+
+          {/* TASK LIST */}
+          {loading ? (
+            <div className="p-6 space-y-4 animate-pulse">
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} className="flex items-center gap-4 py-3 border-b border-slate-100 last:border-0">
+                  <div className="w-5 h-5 bg-slate-200 rounded" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-4 w-48 bg-slate-200 rounded" />
+                    <div className="h-3 w-72 bg-slate-100 rounded" />
+                  </div>
+                  <div className="h-5 w-20 bg-slate-100 rounded-full" />
+                </div>
+              ))}
+            </div>
+          ) : userFilteredTasks.length === 0 ? (
+            <div className="p-12 text-center space-y-3">
+              <Clock className="w-10 h-10 mx-auto text-slate-300" />
+              <div>
+                <p className="text-sm font-semibold text-slate-800">
+                  {viewMode === 'sales_linked' ? 'No linked orders from Sales right now' : 'No tasks for this day'}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {viewMode === 'sales_linked'
+                    ? 'When sales bookings are created, picking and dispatch tasks will appear here.'
+                    : 'Record your accomplishments or assign yourself a task to get started.'}
+                </p>
+              </div>
+              {viewMode === 'my_tasks' && (
+                <button
+                  type="button"
+                  onClick={() => setIsAddTodayWorkModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white text-xs font-semibold shadow-xs transition cursor-pointer min-h-[48px]"
+                >
+                  <PlusCircle className="w-4 h-4 text-emerald-400" />
+                  <span>Add today's work</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* DESKTOP TABLE */}
+              <div className="hidden md:block">
+                <table className="w-full text-left text-xs table-fixed">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/50 text-slate-500 font-semibold uppercase text-[10px]">
+                      <th className="py-2.5 px-3 w-10 text-center">Done</th>
+                      <th className="py-2.5 px-3 w-2/5">Task & Reference</th>
+                      {dateFilter === 'all' && <th className="py-2.5 px-3 w-24">Date</th>}
+                      <th className="py-2.5 px-3 w-28 hidden lg:table-cell">Dept / Location</th>
+                      <th className="py-2.5 px-3 w-20">Priority</th>
+                      <th className="py-2.5 px-3 w-28">Required By</th>
+                      <th className="py-2.5 px-3 w-28">Status</th>
+                      <th className="py-2.5 px-3 w-24 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {userFilteredTasks.map(task => {
+                      const isCompleted = task.status === TASK_STATUSES.COMPLETED;
+                      const locked = isTaskLockedForUser(currentUser, task);
+                      const isOverdue = task.deadlineDate < todayStr && !isCompleted;
+                      const isFromSales = task.isLinkedSalesWork || task.taskCategory === 'stark_door_order';
+
+                      return (
+                        <tr 
+                          key={task.id}
+                          onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
+                          className={`hover:bg-slate-50/70 transition-colors cursor-pointer group ${
+                            isCompleted ? 'bg-slate-50/30' : ''
+                          }`}
+                        >
+                          <td 
+                            className="py-2.5 px-3 text-center align-middle"
+                            onClick={(e) => handleToggleTaskComplete(task, e)}
+                          >
+                            <button
+                              type="button"
+                              className="p-1 rounded text-slate-400 hover:text-[#05331F] transition cursor-pointer min-h-[32px] min-w-[32px] flex items-center justify-center"
+                            >
+                              {isCompleted ? (
+                                <CheckSquare className="w-4 h-4 text-[#10B981]" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />
+                              )}
+                            </button>
+                          </td>
+
+                          {/* Task details */}
+                          <td className="py-2.5 px-3 align-middle pr-4 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`font-semibold truncate ${
+                                isCompleted ? 'line-through text-slate-400' : 'text-slate-900'
+                              }`}>
+                                {task.title}
+                              </span>
+                              {isFromSales && (
+                                <span className="text-[9px] bg-emerald-100 text-[#05331F] font-bold px-1.5 py-0.2 rounded-full border border-emerald-300">
+                                  From Sales
+                                </span>
+                              )}
+                              {task.taskType && (
+                                <span className="text-[9px] bg-slate-100 text-slate-700 font-bold px-1.5 py-0.2 rounded border border-slate-200">
+                                  {task.taskType}
+                                </span>
+                              )}
+                            </div>
+                            {task.description && (
+                              <div className="text-slate-500 text-[11px] truncate mt-0.5">
+                                {task.description}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5 flex-wrap">
+                              {task.reference && <span>Ref: <strong className="text-slate-600">{task.reference}</strong></span>}
+                              {task.dealerName && <span>Dealer: <strong className="text-slate-600">{task.dealerName}</strong></span>}
+                              {task.photos && task.photos.length > 0 && (
+                                <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                                  <Camera className="w-2.5 h-2.5" />
+                                  {task.photos.length} photo proof
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {dateFilter === 'all' && (
+                            <td className="py-2.5 px-3 align-middle text-slate-500 whitespace-nowrap">
+                              {formatCleanDate(task.date || task.taskDate)}
+                            </td>
+                          )}
+
+                          <td className="py-2.5 px-3 align-middle text-slate-500 truncate hidden lg:table-cell">
+                            {task.location ? (
+                              <span className="flex items-center gap-1 text-slate-700 font-medium truncate">
+                                <MapPin className="w-3 h-3 text-emerald-700 shrink-0" />
+                                <span>{task.location}</span>
+                              </span>
+                            ) : (
+                              formatDepartmentName(task.departmentId || task.department)
+                            )}
+                          </td>
+
+                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                            {renderPriorityBadge(task.priority)}
+                          </td>
+
+                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                            <span className={`text-[11px] font-semibold ${
+                              isOverdue ? 'text-rose-600' : 'text-slate-700'
+                            }`}>
+                              {formatCleanDate(task.requiredBy || task.deadlineDate || task.date || task.taskDate)}
+                            </span>
+                          </td>
+
+                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                            {renderStatusBadge(task.status)}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-2.5 px-3 align-middle text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1 relative">
+                              {isSupervisorOrManager && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleSplitTask(task, e)}
+                                  title="Split task for downline (subtask)"
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
+                                >
+                                  <GitFork className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-[#05331F] hover:bg-slate-100 transition cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
+                              >
+                                {isCompleted ? <Check className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setActiveMenuTaskId(activeMenuTaskId === task.id ? null : task.id)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
+                              >
+                                <MoreHorizontal className="w-3.5 h-3.5" />
+                              </button>
+
+                              {activeMenuTaskId === task.id && (
+                                <div
+                                  ref={menuRef}
+                                  className="absolute right-0 top-8 z-30 w-40 bg-white border border-slate-200 rounded-xl shadow-lg py-1 text-left text-xs animate-in fade-in zoom-in-95 duration-100"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMenuTaskId(null);
+                                      if (onOpenTaskDetails) onOpenTaskDetails(task);
+                                    }}
+                                    className="w-full px-3 py-1.5 hover:bg-slate-50 text-slate-700 flex items-center gap-2 cursor-pointer"
+                                  >
+                                    <Eye className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>View & Edit</span>
+                                  </button>
+                                  {isSupervisorOrManager && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleSplitTask(task, e)}
+                                      className="w-full px-3 py-1.5 hover:bg-emerald-50 text-[#05331F] flex items-center gap-2 cursor-pointer font-medium"
+                                    >
+                                      <GitFork className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Split for Downline</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleDeleteTask(task, e)}
+                                    className="w-full px-3 py-1.5 hover:bg-rose-50 text-rose-600 flex items-center gap-2 cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                    <span>Delete</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* MOBILE STACKED CARDS VIEW (Tap targets >= 48px) */}
+              <div className="md:hidden divide-y divide-slate-100">
+                {userFilteredTasks.map(task => {
+                  const isCompleted = task.status === TASK_STATUSES.COMPLETED;
+                  const isOverdue = task.deadlineDate < todayStr && !isCompleted;
+                  const isFromSales = task.isLinkedSalesWork || task.taskCategory === 'stark_door_order';
+
+                  return (
+                    <div
+                      key={task.id}
+                      onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
+                      className="p-4 space-y-2.5 active:bg-slate-50/80 transition-colors cursor-pointer min-h-[48px]"
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleTaskComplete(task, e)}
+                          className="p-1 -ml-1 text-slate-400 hover:text-[#05331F] min-h-[48px] min-w-[48px] flex items-center justify-center shrink-0 cursor-pointer"
+                        >
+                          {isCompleted ? (
+                            <CheckSquare className="w-5 h-5 text-[#10B981]" />
+                          ) : (
+                            <Square className="w-5 h-5 text-slate-400" />
+                          )}
+                        </button>
+
+                        <div className="min-w-0 flex-1 pt-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className={`text-xs font-semibold leading-snug ${
+                              isCompleted ? 'line-through text-slate-400' : 'text-slate-900'
+                            }`}>
+                              {task.title}
+                            </h4>
+                            {isFromSales && (
+                              <span className="text-[9px] bg-emerald-100 text-[#05331F] font-bold px-1.5 py-0.2 rounded-full border border-emerald-300">
+                                From Sales
+                              </span>
+                            )}
+                          </div>
+                          {task.description && (
+                            <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                              {task.description}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1 flex-wrap">
+                            {task.reference && <span>Ref: <strong>{task.reference}</strong></span>}
+                            {task.location && <span>Loc: <strong>{task.location}</strong></span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-50 flex-wrap gap-2 pl-10">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {renderStatusBadge(task.status)}
+                          {renderPriorityBadge(task.priority)}
+                        </div>
+
+                        <span className={`text-[11px] font-semibold ${
+                          isOverdue ? 'text-rose-600' : 'text-slate-600'
+                        }`}>
+                          Req: {formatCleanDate(task.requiredBy || task.deadlineDate || task.date || task.taskDate)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+        </div>
+
+        {/* MOBILE BOTTOM SHEET FOR FILTERS */}
+        {isMobileFilterOpen && (
+          <div 
+            className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end justify-center md:hidden"
+            onClick={() => setIsMobileFilterOpen(false)}
+          >
+            <div 
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-white rounded-t-3xl p-5 space-y-4 max-h-[80vh] overflow-y-auto safe-pb animate-in slide-in-from-bottom duration-200"
+            >
+              <div className="flex items-center justify-between border-b pb-3 border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-900">Filter Tasks</h3>
+                <button 
+                  onClick={() => setIsMobileFilterOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700 min-h-[48px] min-w-[48px] flex items-center justify-center"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Status</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 min-h-[48px]"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value={TASK_STATUSES.ASSIGNED}>Pending</option>
+                    <option value={TASK_STATUSES.IN_PROGRESS}>In progress</option>
+                    <option value={TASK_STATUSES.PENDING_REVIEW}>In review</option>
+                    <option value="Correction Requested">Changes requested</option>
+                    <option value={TASK_STATUSES.COMPLETED}>Completed</option>
+                    <option value={TASK_STATUSES.BLOCKED}>Blocked</option>
+                    <option value="overdue">Overdue</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Priority</label>
+                  <select
+                    value={priorityFilter}
+                    onChange={(e) => setPriorityFilter(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 min-h-[48px]"
+                  >
+                    <option value="all">All priorities</option>
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Critical</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsMobileFilterOpen(false)}
+                  className="w-full py-3.5 bg-[#05331F] text-white rounded-xl text-xs font-semibold min-h-[48px]"
+                >
+                  Apply Filters
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: "Add Today's Work" */}
+        <AddTodayWorkModal
+          isOpen={isAddTodayWorkModalOpen}
+          onClose={() => setIsAddTodayWorkModalOpen(false)}
+          currentUser={currentUser}
+          departments={departments}
+          onTaskCreated={(newTask) => {
+            if (onTaskCreated) onTaskCreated(newTask);
+            showToast("Today's work added successfully!");
+          }}
+        />
+
+      </div>
+
+      {/* Lightbox photo viewer */}
+      {activePhotoViewer && (
+        <div 
+          onClick={() => setActivePhotoViewer(null)}
+          className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div className="relative max-w-3xl max-h-[90vh]">
+            <button
+              onClick={() => setActivePhotoViewer(null)}
+              className="absolute -top-10 right-0 text-white font-bold text-sm bg-black/40 px-3 py-1 rounded-full"
+            >
+              Close ✕
+            </button>
+            <img 
+              src={activePhotoViewer} 
+              alt="Operational Proof Full Preview" 
+              className="max-h-[85vh] max-w-full rounded-2xl object-contain shadow-2xl" 
+            />
+          </div>
         </div>
       )}
-
-      {/* MODAL: ADD TODAY'S WORK */}
-      <AddTodayWorkModal
-        isOpen={isAddTodayWorkModalOpen}
-        onClose={() => setIsAddTodayWorkModalOpen(false)}
-        currentUser={currentUser}
-        departments={departments}
-        onTaskCreated={(newTask) => {
-          if (onTaskCreated) {
-            onTaskCreated(newTask);
-          } else if (onTaskUpdated) {
-            onTaskUpdated(newTask);
-          }
-          showToast("Today's work logged successfully.", "success");
-        }}
-      />
-
-    </div>
+    </>
   );
 }

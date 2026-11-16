@@ -36,11 +36,6 @@ service cloud.firestore {
              role == 'HR & Admin Manager';
     }
 
-    // Check if user is top leadership (Executive Director or Director Operations)
-    function isTopLeadership() {
-      return isAllAccessPerformanceRole();
-    }
-
     // Department Head check
     function isDepartmentHead(dept) {
       let role = getUserData().role;
@@ -48,39 +43,33 @@ service cloud.firestore {
       return (userDept == dept) && (
         role == 'Chief Sales Officer' || role == 'CSO' ||
         role == 'Operations Head' ||
-        role == 'Accounts Manager' ||
+        role == 'Accounts Manager' || role == 'Accounts Executive' ||
         role == 'Brand Manager' ||
         role == 'Service Manager' ||
         role == 'Transport Manager' ||
-        role == 'Warehouse In-charge'
+        role == 'Warehouse In-charge' ||
+        role == 'Inventory Supervisor'
       );
     }
 
-    // Downline access check: verifies if target employee ID is inside the user's downline array
-    function isDownlineMember(targetEmpId) {
-      let downline = getUserData().downline;
-      return downline != null && targetEmpId in downline;
-    }
-
-    // Sales Department Helper: Checks if user belongs to Sales hierarchy
-    function isSalesUser() {
-      let role = getUserData().role;
-      let dept = getUserData().department;
-      return dept == 'sales' || 
-             role == 'CSO' || 
-             role == 'Chief Sales Officer' || 
-             role == 'SSM' || 
-             role == 'State Sales Manager' || 
-             role == 'Senior Sales Manager' || 
-             role == 'ASM' || 
-             role == 'Asst Sales Manager' || 
-             role == 'Area Sales Manager' || 
-             role == 'Sales Coordinator';
+    // Check downline membership from users document downline array
+    function isDownlineMember(targetUserId) {
+      return getUserData().downline != null && getUserData().downline.hasAny([targetUserId]);
     }
 
     function isCSO() {
       let role = getUserData().role;
       return role == 'CSO' || role == 'Chief Sales Officer';
+    }
+
+    function isOperationsHead() {
+      let role = getUserData().role;
+      return role == 'Operations Head';
+    }
+
+    function isAccountsManager() {
+      let role = getUserData().role;
+      return role == 'Accounts Manager' || role == 'Accounts Executive';
     }
 
     // --- USERS / EMPLOYEES COLLECTION ---
@@ -129,15 +118,12 @@ service cloud.firestore {
     }
 
     // --- TASKS COLLECTION ---
-    // Enforces Scope on Server-Side:
-    // 1. All-Access / Company Scope & CSO: can read and assign all tasks
-    // 2. Department Scope: can read tasks in their department
-    // 3. Downline Scope: can read tasks assigned to themselves or their downline array
-    // 4. Self Scope: strictly their own assigned tasks
     match /tasks/{taskId} {
       allow read: if isAuthenticated() && (
         isAllAccessPerformanceRole() ||
         isCSO() ||
+        isOperationsHead() ||
+        isAccountsManager() ||
         resource.data.assignedToId == request.auth.uid ||
         resource.data.createdById == request.auth.uid ||
         resource.data.requestedBy.id == request.auth.uid ||
@@ -148,30 +134,32 @@ service cloud.firestore {
       allow create: if isAuthenticated() && (
         isCompanyScope() ||
         isCSO() ||
+        isOperationsHead() ||
+        isAccountsManager() ||
         request.resource.data.createdById == request.auth.uid ||
         request.resource.data.assignedToId == request.auth.uid ||
         isDownlineMember(request.resource.data.assignedToId) ||
-        // Allow cross-department requests directed to Marketing / Brand Manager
-        (request.resource.data.departmentId == 'marketing' && request.resource.data.isMarketingRequest == true)
+        // Cross-department request directed to Marketing
+        (request.resource.data.departmentId == 'marketing' && request.resource.data.isMarketingRequest == true) ||
+        // Operations cross-branch request or linked work from Sales
+        (request.resource.data.isBranchRequest == true || request.resource.data.isLinkedSalesWork == true)
       );
       
-      // Updates (subtask completion, status change, approvals)
+      // Updates (subtask completion, status change, approvals, payment clearance/hold)
       allow update: if isAuthenticated() && (
         isCompanyScope() ||
         isCSO() ||
+        isOperationsHead() ||
+        isAccountsManager() ||
         resource.data.assignedToId == request.auth.uid ||
         resource.data.createdById == request.auth.uid ||
         isDownlineMember(resource.data.assignedToId)
       );
 
-      allow delete: if isAuthenticated() && (isCompanyScope() || isCSO());
+      allow delete: if isAuthenticated() && (isCompanyScope() || isCSO() || isOperationsHead() || isAccountsManager());
     }
 
     // --- PRECOMPUTED DAILY STATS ({uid_date}) ---
-    // Allowed only if reader is:
-    // - The owner (request.auth.uid == uid)
-    // - An ancestor in owner's reportsTo chain (owner in reader's downline array)
-    // - Or an all-access performance role (Director Operations, Executive Director)
     match /dailyStats/{statId} {
       allow read: if isAuthenticated() && (
         isAllAccessPerformanceRole() ||
@@ -202,29 +190,16 @@ service cloud.firestore {
       allow write: if isAuthenticated() && isCompanyScope();
     }
 
-    // --- TODOS COLLECTION (Strictly private to the user) ---
-    match /todos/{todoId} {
-      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid;
-      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
-    }
-
-    // --- DEALERS COLLECTION ---
+    // --- DEALERS & DEALER BOOKINGS ---
     match /dealers/{dealerId} {
-      allow read, create, update: if isAuthenticated() && (
-        isCompanyScope() || 
-        isSalesUser()
-      );
-      allow delete: if isAuthenticated() && isCompanyScope();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isCompanyScope() || isCSO());
     }
 
-    // --- DEALER BOOKINGS COLLECTION ---
     match /dealerBookings/{bookingId} {
-      allow read, create, update: if isAuthenticated() && (
-        isCompanyScope() || 
-        isSalesUser()
-      );
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
       allow delete: if isAuthenticated() && isCompanyScope();
     }
   }

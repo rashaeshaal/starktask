@@ -6,8 +6,7 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    // Attachments uploaded for tasks
-    // Allowed file types: images, PDFs, videos up to 25 MB
+    // Task & Finance Attachments (Payment slips, invoices, statements as PDF or image up to 10 MB each; marketing up to 25 MB)
     match /taskAttachments/{taskId}/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated()
@@ -17,6 +16,27 @@ service firebase.storage {
                      || request.resource.contentType == 'application/pdf'
                      || request.resource.contentType.matches('video/.*')
                    );
+      allow delete: if isAuthenticated();
+    }
+
+    // Finance attachments (Payment slips, Invoices, Bank statements, Reconciliation proofs) up to 10 MB
+    match /financeAttachments/{taskId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+                   && request.resource.size <= 10 * 1024 * 1024
+                   && (
+                     request.resource.contentType.matches('image/.*')
+                     || request.resource.contentType == 'application/pdf'
+                   );
+      allow delete: if isAuthenticated();
+    }
+
+    // Operations photos (proof of loading, delivery, repair) up to 10 MB
+    match /operationsPhotos/{taskId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+                   && request.resource.size <= 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
       allow delete: if isAuthenticated();
     }
 

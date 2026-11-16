@@ -3,7 +3,8 @@ import {
   CheckCircle2, Clock, AlertTriangle, Layers, ArrowRight, 
   Search, Eye, ChevronDown, Check, ArrowUpRight, BarChart2,
   Calendar, CheckSquare, Plus, AlertCircle, TrendingUp, TrendingDown,
-  Package, Users, Briefcase, UserCheck
+  Package, Users, Briefcase, UserCheck, Megaphone, ExternalLink, MessageSquare,
+  Truck, Wrench, Play, CreditCard, ShieldAlert
 } from 'lucide-react';
 import { TASK_STATUSES } from './rbac';
 import { getTodayDateString, getDateOffset } from './dateUtils';
@@ -13,9 +14,10 @@ import {
   getVisibleUserIds, 
   canAccess,
   SCOPES, 
-  PAGES 
+  PAGES,
+  normalizeRoleName 
 } from './permissions';
-import { canAccessSales, filterBookingsByScope } from './salesPermissions';
+import { canAccessSales } from './salesPermissions';
 
 function getGreeting(name) {
   const hour = new Date().getHours();
@@ -24,6 +26,13 @@ function getGreeting(name) {
   const formattedName = rawFirst.charAt(0).toUpperCase() + rawFirst.slice(1).toLowerCase();
   return `${timeGreeting}, ${formattedName}`;
 }
+
+const OPERATIONS_BRANCHES_META = [
+  { id: 'warehouse', name: 'Warehouse', headRole: 'Warehouse In-charge', defaultHead: 'MUHAMMED SUHAIB' },
+  { id: 'transportation', name: 'Transportation', headRole: 'Transport Manager', defaultHead: 'NAYAN RAM' },
+  { id: 'service', name: 'Service', headRole: 'Service Manager', defaultHead: 'AMAL KUMAR T K' },
+  { id: 'inventory', name: 'Inventory', headRole: 'Inventory Supervisor', defaultHead: 'TOBIN THOMAS' }
+];
 
 export default function CompanyDashboardView({ 
   tasks = [], 
@@ -44,149 +53,197 @@ export default function CompanyDashboardView({
   const [dashQuickTodo, setDashQuickTodo] = useState('');
 
   const scope = getScope(currentUser);
-  const isSales = canAccessSales(currentUser);
+  const userRole = normalizeRoleName(currentUser?.role || '');
+  const userDept = (currentUser?.department || '').toLowerCase();
+
+  // Finance Role Heuristics
+  const isFinanceRole = userDept === 'finance' || userDept === 'accounts' ||
+                        ['Accounts Manager', 'Accountant'].includes(userRole);
+  const isAccountsManager = userRole === 'Accounts Manager';
+  const isAccountant = userRole === 'Accountant';
+
+  // Operations Role Heuristics
+  const isOperationsHead = userRole === 'Operations Head';
+  const isWarehouseInCharge = userRole === 'Warehouse In-charge';
+  const isTransportManager = userRole === 'Transport Manager';
+  const isServiceManager = userRole === 'Service Manager';
+  const isInventorySupervisor = userRole === 'Inventory Supervisor';
+
+  const isOperationsBranchManager = isWarehouseInCharge || isTransportManager || isServiceManager || isInventorySupervisor;
+  const isOperationsSupervisor = userRole.includes('Supervisor') || userRole.includes('Coordinator');
+
+  const isFrontline = ['Loading Staff', 'Driver', 'Delivery Partner', 'Technician', 'Service Technician', 'Storekeeper'].includes(userRole);
+
+  const isOperationsRole = isOperationsHead || isOperationsBranchManager || isOperationsSupervisor || isFrontline || userRole === 'Operations Assistant';
+
+  // Marketing Persona Check
+  const isMarketingRole = userDept === 'marketing' || ['Brand Manager', 'Leads Coordinator', 'Graphic Designer', 'Photographer'].includes(userRole);
+  const isBrandManager = userRole === 'Brand Manager';
+  const isLeadsCoordinator = userRole === 'Leads Coordinator';
+  const isMarketingReviewer = isBrandManager || isLeadsCoordinator;
+
+  // HR Leadership Check
+  const isHRManager = useMemo(() => {
+    const r = userRole.toLowerCase();
+    return r.includes('hr manager') || r.includes('admin manager');
+  }, [userRole]);
 
   // 1. Get visible user IDs according to RBAC scope
   const visibleUserIds = useMemo(() => {
     return getVisibleUserIds(currentUser, employees);
   }, [currentUser, employees]);
 
-  // 2. Filter tasks strictly by visible user IDs
+  // 2. Filter tasks strictly by visible user IDs / scope
   const scopedTasks = useMemo(() => {
-    if (scope === SCOPES.COMPANY) {
+    if (scope === SCOPES.COMPANY && !isHRManager) {
       return tasks;
     }
     const idSet = new Set(visibleUserIds.map(String));
     return tasks.filter(t => {
       const assignedId = String(t.assignedToId || t.assignedTo || '');
-      const createdId = String(t.createdById || t.createdBy || '');
-      return idSet.has(assignedId) || idSet.has(createdId);
+      const isMine = idSet.has(assignedId);
+      // For Brand Manager: include marketing requests
+      const isMktReq = isBrandManager && (t.isMarketingRequest || t.category === 'Marketing Request');
+      // For Operations Head: include all operations branch tasks
+      const isOpsDept = isOperationsHead && ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'].includes((t.departmentId || t.department || '').toLowerCase());
+      // For Finance: include all finance tasks
+      const isFinTask = isFinanceRole && ((t.departmentId || t.department || '').toLowerCase() === 'finance' || t.taskType === 'Payment verification');
+      return isMine || isMktReq || isOpsDept || isFinTask;
     });
-  }, [tasks, scope, visibleUserIds]);
+  }, [scope, isHRManager, visibleUserIds, tasks, isBrandManager, isOperationsHead, isFinanceRole]);
 
-  // Filter tasks: Today vs Yesterday
+  // 3. Computed KPI metrics (Total, Completed, Pending, Overdue)
   const todayTasks = useMemo(() => {
-    return scopedTasks.filter(t => (t.taskDate || t.deadlineDate || t.createdAt || '').startsWith(todayStr));
+    return scopedTasks.filter(t => {
+      const taskDate = t.taskDate || t.deadlineDate || t.createdAt || '';
+      return taskDate.startsWith(todayStr);
+    });
   }, [scopedTasks, todayStr]);
 
   const yesterdayTasks = useMemo(() => {
-    return scopedTasks.filter(t => (t.taskDate || t.deadlineDate || t.createdAt || '').startsWith(yesterdayStr));
+    return scopedTasks.filter(t => {
+      const taskDate = t.taskDate || t.deadlineDate || t.createdAt || '';
+      return taskDate.startsWith(yesterdayStr);
+    });
   }, [scopedTasks, yesterdayStr]);
 
-  // Overall KPIs
   const totalTasksToday = todayTasks.length;
   const completedToday = todayTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
-  const pendingToday = todayTasks.filter(t => t.status === TASK_STATUSES.PENDING || t.status === 'Pending' || t.status === TASK_STATUSES.IN_PROGRESS).length;
-  const overdueToday = todayTasks.filter(t => {
-    const isDone = t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed';
-    const isOvd = (t.deadlineDate && t.deadlineDate < todayStr) || t.status === TASK_STATUSES.OVERDUE || t.status === 'Overdue';
-    return !isDone && isOvd;
-  }).length;
-
-  const yesterdayTotal = yesterdayTasks.length;
-  const yesterdayCompleted = yesterdayTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
-  const yesterdayPending = yesterdayTasks.filter(t => t.status === TASK_STATUSES.PENDING || t.status === 'Pending' || t.status === TASK_STATUSES.IN_PROGRESS).length;
-
-  const totalDiff = totalTasksToday - yesterdayTotal;
-  const completedDiff = completedToday - yesterdayCompleted;
-  const pendingDiff = pendingToday - yesterdayPending;
+  const pendingToday = todayTasks.filter(t => t.status !== TASK_STATUSES.COMPLETED && t.status !== 'Completed').length;
+  
+  const overdueToday = useMemo(() => {
+    return scopedTasks.filter(t => {
+      const isDone = t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed';
+      const isOverdue = (t.deadlineDate && t.deadlineDate < todayStr) || t.status === TASK_STATUSES.OVERDUE || t.status === 'Overdue' || t.status === 'Blocked';
+      return !isDone && isOverdue;
+    }).length;
+  }, [scopedTasks, todayStr]);
 
   const completionPct = totalTasksToday > 0 ? Math.round((completedToday / totalTasksToday) * 100) : 0;
 
-  // Check if current user is in HR leadership
-  const isHRManager = useMemo(() => {
-    const r = (currentUser?.role || '').toLowerCase();
-    return r.includes('hr manager') || r.includes('admin manager');
-  }, [currentUser]);
-
-  // Sub-label matching scope
+  // Sub-label matching scope ("Your team")
   const scopeKpiLabel = useMemo(() => {
+    if (isFinanceRole) return 'Your team';
+    if (isOperationsRole) {
+      if (isOperationsHead) return 'All Operations branches';
+      if (isOperationsBranchManager) return 'Your branch';
+      if (isOperationsSupervisor) return 'Your team';
+      return 'Assigned to you';
+    }
+    if (isMarketingRole) {
+      if (isBrandManager) return 'Marketing department';
+      if (isLeadsCoordinator) return 'Your squad';
+      return 'Assigned to you';
+    }
     if (isHRManager) return 'Your team';
     if (scope === SCOPES.COMPANY) return 'Across the company';
     if (scope === SCOPES.DEPARTMENT) return 'Your department';
     if (scope === SCOPES.DOWNLINE) return 'Your squad';
     return 'Assigned to you';
-  }, [scope, isHRManager]);
+  }, [scope, isFinanceRole, isHRManager, isOperationsRole, isOperationsHead, isOperationsBranchManager, isOperationsSupervisor, isMarketingRole, isBrandManager, isLeadsCoordinator]);
 
-  // Department cards (for COMPANY SCOPE only, 10 operational depts, excluding management)
-  const departmentStats = useMemo(() => {
-    if (scope !== SCOPES.COMPANY) return [];
+  // 4. FINANCE PAYMENT VERIFICATION LIST (Pending verifications sorted by required-by date, age, holds on top)
+  const financePaymentVerifications = useMemo(() => {
+    if (!isFinanceRole) return [];
+    
+    // Find all payment verification tasks
+    const payTasks = scopedTasks.filter(t => 
+      t.taskType === 'Payment verification' ||
+      (t.title && t.title.toLowerCase().includes('payment')) ||
+      (t.title && t.title.toLowerCase().includes('token'))
+    );
 
-    const operationalDepts = COMPANY_DEPARTMENTS.filter(d => d.id !== 'management');
+    const now = new Date();
+    const formatted = payTasks.map(t => {
+      const reqDate = t.requiredBy || t.deadlineDate || todayStr;
+      const createdDate = t.createdAt ? new Date(t.createdAt) : now;
+      const ageHours = Math.max(0, Math.floor((now - createdDate) / (1000 * 60 * 60)));
+      const ageDays = Math.floor(ageHours / 24);
+      const isHold = t.paymentStatus === 'Payment Hold' || t.accountsClearance === 'Payment Hold';
 
-    return operationalDepts.map(dept => {
-      // Find real head
-      const deptEmployees = employees.filter(e => {
-        const d = (e.department || e.departmentId || '').toLowerCase();
-        return d.includes(dept.id.toLowerCase()) || d.includes(dept.name.toLowerCase());
-      });
+      return {
+        ...t,
+        reqDate,
+        ageStr: ageDays > 0 ? `${ageDays}d ${ageHours % 24}h` : `${ageHours}h`,
+        isHold
+      };
+    });
 
-      const headEmp = deptEmployees.find(e => {
-        const r = (e.role || e.designation || '').toLowerCase();
-        return r.includes('head') || r.includes('manager') || r.includes('officer') || r.includes('supervisor');
-      });
+    // Sort: Holds on top, then by required-by date ascending
+    return formatted.sort((a, b) => {
+      if (a.isHold && !b.isHold) return -1;
+      if (!a.isHold && b.isHold) return 1;
+      return a.reqDate.localeCompare(b.reqDate);
+    });
+  }, [isFinanceRole, scopedTasks, todayStr]);
 
-      const realHeadName = headEmp ? (headEmp.fullName || headEmp.name) : '';
+  // 5. BRANCH GRID FOR OPERATIONS HEAD (Warehouse, Transportation, Service, Inventory)
+  const operationsBranchStats = useMemo(() => {
+    if (!isOperationsHead) return [];
 
-      const deptTasks = tasks.filter(t => {
+    const stats = OPERATIONS_BRANCHES_META.map(branch => {
+      const branchTasks = tasks.filter(t => {
         const d = (t.departmentId || t.department || '').toLowerCase();
-        return d.includes(dept.id.toLowerCase()) || d.includes(dept.name.toLowerCase());
+        return d.includes(branch.id);
       });
 
-      const todayDeptTasks = deptTasks.filter(t => (t.taskDate || t.deadlineDate || t.createdAt || '').startsWith(todayStr));
-      const total = todayDeptTasks.length;
-      const completed = todayDeptTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
-      const overdue = todayDeptTasks.filter(t => {
+      const todayBranchTasks = branchTasks.filter(t => (t.taskDate || t.deadlineDate || t.createdAt || '').startsWith(todayStr));
+      const total = todayBranchTasks.length;
+      const completed = todayBranchTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
+      const overdue = todayBranchTasks.filter(t => {
         const isDone = t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed';
-        const isOvd = (t.deadlineDate && t.deadlineDate < todayStr) || t.status === TASK_STATUSES.OVERDUE || t.status === 'Overdue';
+        const isOvd = (t.deadlineDate && t.deadlineDate < todayStr) || t.status === 'Overdue' || t.status === 'Blocked';
         return !isDone && isOvd;
       }).length;
 
       const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
+      // Find branch head name
+      const headEmp = employees.find(e => (e.role || '').toLowerCase().includes(branch.headRole.toLowerCase()));
+      const headName = headEmp ? (headEmp.fullName || headEmp.name) : branch.defaultHead;
+
       return {
-        ...dept,
-        headName: realHeadName,
+        ...branch,
+        headName,
         total,
         completed,
         overdue,
         rate
       };
     });
-  }, [scope, employees, tasks, todayStr]);
 
-  // Department Team cards (for DEPARTMENT SCOPE)
-  const departmentTeamStats = useMemo(() => {
-    if (scope !== SCOPES.DEPARTMENT) return [];
-    const userDept = (currentUser.department || currentUser.departmentId || '').toLowerCase();
+    // Sort by most urgent first (overdue desc, then total desc)
+    return stats.sort((a, b) => b.overdue - a.overdue || b.total - a.total);
+  }, [isOperationsHead, tasks, employees, todayStr]);
 
-    const deptTeams = teams.filter(tm => {
-      const td = (tm.departmentId || tm.department || '').toLowerCase();
-      return td.includes(userDept);
-    });
-
-    return deptTeams.map(tm => {
-      const teamTasks = scopedTasks.filter(t => t.teamId === tm.id || (t.assignedToName && (tm.memberNames || []).includes(t.assignedToName)));
-      const todayTeamTasks = teamTasks.filter(t => (t.taskDate || t.deadlineDate || t.createdAt || '').startsWith(todayStr));
-      const total = todayTeamTasks.length;
-      const completed = todayTeamTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
-      const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
-      return {
-        ...tm,
-        total,
-        completed,
-        rate
-      };
-    });
-  }, [scope, currentUser, teams, scopedTasks, todayStr]);
-
-  // Squad table members (for DOWNLINE SCOPE or HR Management)
+  // 6. SQUAD MEMBERS TABLE (Accounts Manager, Branch Managers & Supervisors: Name, Role, Tasks done/total, overdue, waiting for sign-off)
   const squadMembersStats = useMemo(() => {
-    if (scope !== SCOPES.DOWNLINE && !isHRManager) return [];
-    
-    const myId = String(currentUser.id || currentUser.uid || currentUser.employeeId);
-    const downlineEmp = employees.filter(e => {
-      const eId = String(e.id || e.uid || e.employeeId);
+    const isSquadLeader = (isAccountsManager || isOperationsBranchManager || isOperationsSupervisor || isHRManager || (isMarketingRole && isMarketingReviewer));
+    if (!isSquadLeader) return [];
+
+    const myId = String(currentUser?.id || currentUser?.uid || currentUser?.employeeId);
+    const downlineEmp = employees.filter(emp => {
+      const eId = String(emp.id || emp.uid || emp.employeeId);
       return eId !== myId && visibleUserIds.includes(eId);
     });
 
@@ -196,9 +253,10 @@ export default function CompanyDashboardView({
       const todayEmpTasks = empTasks.filter(t => (t.taskDate || t.deadlineDate || t.createdAt || '').startsWith(todayStr));
       const total = todayEmpTasks.length;
       const done = todayEmpTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
+      const inReview = todayEmpTasks.filter(t => t.status === TASK_STATUSES.PENDING_REVIEW || t.status === 'Pending Review' || t.status === 'In Review').length;
       const ovd = todayEmpTasks.filter(t => {
         const isCompleted = t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed';
-        return !isCompleted && ((t.deadlineDate && t.deadlineDate < todayStr) || t.status === 'Overdue');
+        return !isCompleted && ((t.deadlineDate && t.deadlineDate < todayStr) || t.status === 'Overdue' || t.status === 'Blocked');
       }).length;
 
       return {
@@ -207,272 +265,287 @@ export default function CompanyDashboardView({
         designation: emp.designation || emp.role || 'Staff',
         total,
         done,
+        inReview,
         ovd,
-        status: ovd > 0 ? 'Needs Attention' : total > 0 && done === total ? 'All Complete' : total > 0 ? 'In Progress' : 'No Tasks'
+        status: ovd > 0 ? 'Needs Attention' : inReview > 0 ? 'In Review' : total > 0 && done === total ? 'All Complete' : total > 0 ? 'In Progress' : 'No Tasks'
       };
     });
-  }, [scope, isHRManager, currentUser, employees, visibleUserIds, tasks, todayStr]);
+  }, [isAccountsManager, isOperationsBranchManager, isOperationsSupervisor, isHRManager, isMarketingRole, isMarketingReviewer, currentUser, employees, visibleUserIds, tasks, todayStr]);
 
-  // Frontline Next Deadlines (for SELF SCOPE)
-  const myNextDeadlines = useMemo(() => {
-    if (scope !== SCOPES.SELF) return [];
-    return scopedTasks
-      .filter(t => t.status !== TASK_STATUSES.COMPLETED && t.status !== 'Completed')
-      .sort((a, b) => (a.deadlineDate || '').localeCompare(b.deadlineDate || ''))
-      .slice(0, 5);
-  }, [scope, scopedTasks]);
+  // 7. Frontline Today Tasks (Large Cards with Start, Done, Next Deadline)
+  const frontlineTasks = useMemo(() => {
+    if (!isFrontline) return [];
+    return scopedTasks.filter(t => {
+      const isDone = t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed';
+      return !isDone;
+    });
+  }, [isFrontline, scopedTasks]);
+
+  const nextFrontlineDeadline = useMemo(() => {
+    if (!isFrontline || frontlineTasks.length === 0) return null;
+    return [...frontlineTasks].sort((a, b) => (a.deadlineDate || '').localeCompare(b.deadlineDate || ''))[0];
+  }, [isFrontline, frontlineTasks]);
 
   // Open To-Dos
   const openTodos = useMemo(() => {
     return todos.filter(t => !t.done).slice(0, 5);
   }, [todos]);
 
-  // Recent 6 Activity Events
-  const recentActivities = useMemo(() => {
-    return [...scopedTasks]
-      .filter(t => t.lastUpdated || t.createdAt)
-      .sort((a, b) => (b.lastUpdated || b.createdAt || '').localeCompare(a.lastUpdated || a.createdAt || ''))
-      .slice(0, 6);
-  }, [scopedTasks]);
-
-  const handleDashQuickSubmit = (e) => {
-    e.preventDefault();
-    if (!dashQuickTodo.trim()) return;
-    if (onQuickAddTodo) {
-      onQuickAddTodo(dashQuickTodo.trim());
-      setDashQuickTodo('');
-    }
-  };
-
   return (
     <div className="space-y-6">
       
-      {/* 1. Clean Greeting Header with Role */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+      {/* 1. Clean Greeting Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            {getGreeting(currentUser?.fullName || currentUser?.name || 'User')}
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+            {getGreeting(currentUser?.fullName || currentUser?.name)}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
-            {' \u00B7 '}
-            <span className="font-semibold text-slate-700">{currentUser?.role || 'Staff'}</span>
-            {' \u00B7 '}
-            <span className="capitalize text-emerald-800 font-medium">({scope} scope)</span>
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} • {currentUser?.role || 'Staff'}
           </p>
+        </div>
+
+        {/* Action shortcut: Add today's work */}
+        <div className="flex items-center gap-2">
+          {canAccess(currentUser, PAGES.TEAM_PERFORMANCE) && (
+            <button
+              onClick={() => onNavigateToTab && onNavigateToTab('team_performance')}
+              className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
+            >
+              <BarChart2 className="w-3.5 h-3.5 text-slate-500" />
+              <span>Team Performance</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* 2. Unified KPI Cards (Total, Completed, Pending, Overdue) Computed over visibleUserIds */}
+      {/* 2. Top Metric Cards (Total, Completed, Pending, Overdue) with scope label */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         
-        {/* Total Tasks */}
-        <div 
-          onClick={() => onNavigateToTab && onNavigateToTab('my_tasks')} 
-          className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-slate-300 cursor-pointer transition"
-        >
+        {/* Card 1: Total Tasks Today */}
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Total Tasks</span>
-            <div className="w-8 h-8 rounded-xl bg-slate-50 text-slate-700 flex items-center justify-center">
+            <span className="text-xs font-bold text-slate-600">Total Tasks</span>
+            <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
               <Layers className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-bold text-slate-900">{totalTasksToday}</span>
-            {scope === SCOPES.COMPANY && (
-              <span className={`text-[11px] font-semibold flex items-center gap-0.5 ${totalDiff >= 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
-                {totalDiff >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                <span>{totalDiff >= 0 ? `+${totalDiff}` : totalDiff} vs yesterday</span>
-              </span>
-            )}
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900">{totalTasksToday}</span>
+            <span className="text-[11px] font-semibold text-slate-500">today</span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">{scopeKpiLabel}</p>
+          <p className="text-[11px] text-slate-500 truncate">{scopeKpiLabel}</p>
         </div>
 
-        {/* Completed */}
-        <div 
-          onClick={() => onNavigateToTab && onNavigateToTab('my_tasks')} 
-          className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-slate-300 cursor-pointer transition"
-        >
+        {/* Card 2: Completed Today */}
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Completed</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+            <span className="text-xs font-bold text-slate-600">Completed</span>
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-700">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-bold text-slate-900">{completedToday}</span>
-            {scope === SCOPES.COMPANY && (
-              <span className={`text-[11px] font-semibold flex items-center gap-0.5 ${completedDiff >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {completedDiff >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                <span>{completedDiff >= 0 ? `+${completedDiff}` : completedDiff} vs yesterday</span>
-              </span>
-            )}
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#05331F]">{completedToday}</span>
+            <span className="text-[11px] font-semibold text-emerald-700">({completionPct}%)</span>
           </div>
-          <p className="text-[11px] text-emerald-600 font-medium mt-1">{completionPct}% finished today</p>
+          <p className="text-[11px] text-slate-500 truncate">{completionPct}% completion rate</p>
         </div>
 
-        {/* Pending / In Progress */}
-        <div 
-          onClick={() => onNavigateToTab && onNavigateToTab('my_tasks')} 
-          className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-slate-300 cursor-pointer transition"
-        >
+        {/* Card 3: Pending / In Progress */}
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Pending / In Progress</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+            <span className="text-xs font-bold text-slate-600">Pending / In Progress</span>
+            <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center text-amber-700">
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-bold text-slate-900">{pendingToday}</span>
-            {scope === SCOPES.COMPANY && (
-              <span className={`text-[11px] font-semibold flex items-center gap-0.5 ${pendingDiff <= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {pendingDiff >= 0 ? `+${pendingDiff}` : pendingDiff} vs yesterday
-              </span>
-            )}
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900">{pendingToday}</span>
+            <span className="text-[11px] font-semibold text-slate-500">remaining</span>
           </div>
-          <p className="text-[11px] text-amber-600 font-medium mt-1">Active execution</p>
+          <p className="text-[11px] text-slate-500 truncate">Currently in execution</p>
         </div>
 
-        {/* Overdue */}
-        <div 
-          onClick={() => onNavigateToTab && onNavigateToTab('my_tasks')} 
-          className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-slate-300 cursor-pointer transition"
-        >
+        {/* Card 4: Overdue Tasks */}
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Overdue</span>
-            <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
+            <span className="text-xs font-bold text-slate-600">Overdue Tasks</span>
+            <div className="w-8 h-8 rounded-xl bg-rose-50 flex items-center justify-center text-rose-700">
               <AlertTriangle className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className={`text-2xl sm:text-3xl font-bold ${overdueToday > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl sm:text-3xl font-extrabold ${overdueToday > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
               {overdueToday}
             </span>
+            <span className="text-[11px] font-semibold text-slate-500">missed</span>
           </div>
-          <p className="text-[11px] text-rose-500 font-medium mt-1">Requires follow-up</p>
+          <p className="text-[11px] text-slate-500 truncate">Requires supervisor follow-up</p>
         </div>
 
       </div>
 
-      {/* 2.5 Quick HR Management Actions Strip (Shown for HR & Leadership roles with manage rights) */}
-      {(canAccess(currentUser, PAGES.ORGANIZATION) || canAccess(currentUser, PAGES.TEAMS)) && isHRManager && (
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+      {/* 3. FINANCE PAYMENT VERIFICATION LIST (Pending verifications sorted by required-by date, age, holds on top) */}
+      {isFinanceRole && (
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <UserCheck className="w-4 h-4 text-emerald-700" />
-              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">HR Operations & Workgroup Actions</h3>
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-[#05331F] flex items-center justify-center font-bold">
+                <CreditCard className="w-4 h-4 text-emerald-700" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-slate-900">Payment Verification Queue</h2>
+                <p className="text-xs text-slate-500">
+                  Sorted by required-by date with active holds prioritized on top
+                </p>
+              </div>
             </div>
-            <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-800 px-2.5 py-0.5 rounded-full border border-emerald-200">
-              Management Portal
+            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-[#05331F]">
+              {financePaymentVerifications.length} Orders
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <button
-              onClick={() => onNavigateToTab && onNavigateToTab('organization')}
-              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition group cursor-pointer"
-            >
-              <div className="w-7 h-7 rounded-lg bg-emerald-100/70 text-[#05331F] flex items-center justify-center shrink-0">
-                <Plus className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-800 truncate">Add Employee</p>
-                <p className="text-[10px] text-slate-400 truncate">New staff onboarding</p>
-              </div>
-            </button>
+          {financePaymentVerifications.length === 0 ? (
+            <div className="p-8 text-center border border-dashed border-slate-200 rounded-2xl text-slate-400 space-y-1">
+              <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-600/50" />
+              <p className="text-xs font-bold text-slate-700">No pending payment verifications</p>
+              <p className="text-[11px]">All Sales bookings have been cleared for operations dispatch.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50/70 border-b border-slate-100 text-slate-500 font-semibold uppercase text-[10px]">
+                  <tr>
+                    <th className="py-2.5 px-3">Order / Dealer</th>
+                    <th className="py-2.5 px-3">Salesperson</th>
+                    <th className="py-2.5 px-3 text-center">Required By</th>
+                    <th className="py-2.5 px-3 text-center">Age</th>
+                    <th className="py-2.5 px-3 text-center">Payment Status</th>
+                    <th className="py-2.5 px-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {financePaymentVerifications.map(t => (
+                    <tr 
+                      key={t.id} 
+                      onClick={() => onOpenTaskDetails && onOpenTaskDetails(t)}
+                      className={`hover:bg-slate-50/80 cursor-pointer transition ${t.isHold ? 'bg-rose-50/40' : ''}`}
+                    >
+                      <td className="py-2.5 px-3">
+                        <div className="font-bold text-slate-900">{t.partyName || t.dealerName || t.title}</div>
+                        <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                          <span className="bg-slate-100 px-1.5 py-0.2 rounded font-mono font-semibold text-slate-700">
+                            #{t.reference || t.bookingId || t.id.slice(-6)}
+                          </span>
+                          {t.isHold && (
+                            <span className="text-rose-700 font-semibold">Hold: {t.holdReason}</span>
+                          )}
+                        </div>
+                      </td>
 
-            <button
-              onClick={() => onNavigateToTab && onNavigateToTab('organization')}
-              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition group cursor-pointer"
-            >
-              <div className="w-7 h-7 rounded-lg bg-slate-200/70 text-slate-700 flex items-center justify-center shrink-0">
-                <Users className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-800 truncate">Import Directory</p>
-                <p className="text-[10px] text-slate-400 truncate">Bulk Excel/CSV upload</p>
-              </div>
-            </button>
+                      <td className="py-2.5 px-3 text-slate-600">
+                        {t.salespersonName || t.createdByName || 'Sales Desk'}
+                      </td>
 
-            <button
-              onClick={() => onNavigateToTab && onNavigateToTab('teams')}
-              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition group cursor-pointer"
-            >
-              <div className="w-7 h-7 rounded-lg bg-slate-200/70 text-slate-700 flex items-center justify-center shrink-0">
-                <Briefcase className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-800 truncate">Create Team</p>
-                <p className="text-[10px] text-slate-400 truncate">Workgroup placement</p>
-              </div>
-            </button>
+                      <td className="py-2.5 px-3 text-center font-bold text-rose-600">
+                        {t.reqDate}
+                      </td>
 
-            <button
-              onClick={() => onNavigateToTab && onNavigateToTab('approvals')}
-              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 hover:bg-amber-50 hover:border-amber-200 border border-slate-200 text-left transition group cursor-pointer"
-            >
-              <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-800 truncate">Pending Sign-Offs</p>
-                <p className="text-[10px] text-slate-400 truncate">Review completion requests</p>
-              </div>
-            </button>
-          </div>
+                      <td className="py-2.5 px-3 text-center text-slate-500 font-medium">
+                        {t.ageStr}
+                      </td>
+
+                      <td className="py-2.5 px-3 text-center">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                          t.paymentStatus === 'Payment Hold' 
+                            ? 'bg-rose-100 text-rose-800 border-rose-300' 
+                            : t.paymentStatus === 'Cleared' 
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                        }`}>
+                          {t.paymentStatus || 'Pending Token'}
+                        </span>
+                      </td>
+
+                      <td className="py-2.5 px-3 text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenTaskDetails && onOpenTaskDetails(t);
+                          }}
+                          className="px-3 py-1 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white font-bold text-[11px] shadow-2xs"
+                        >
+                          Verify
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 3. Scope-Appropriate Middle Block */}
-
-      {/* CASE A: COMPANY SCOPE (Except HR Manager) -> 10 Department Cards */}
-      {scope === SCOPES.COMPANY && !isHRManager && departmentStats.length > 0 && (
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
+      {/* 4. OPERATIONS HEAD BRANCH STATUS GRID (Warehouse, Transportation, Service, Inventory) */}
+      {isOperationsHead && (
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-900">Department Status</h2>
+              <h2 className="text-base font-bold text-slate-900">Operations Branches Throughput</h2>
               <p className="text-xs text-slate-500">
-                Live throughput across all 10 company departments
+                Sorted by highest operational urgency (overdue & pending execution)
               </p>
             </div>
-            <button
-              onClick={() => onNavigateToTab && onNavigateToTab('team_performance')}
-              className="text-xs font-semibold text-[#05331F] hover:underline flex items-center gap-1"
-            >
-              <span>View team performance</span>
-              <ChevronDown className="w-3.5 h-3.5 -rotate-90" />
-            </button>
+            <span className="text-xs bg-emerald-100 text-[#05331F] font-bold px-2.5 py-0.5 rounded-full">
+              4 Operational Branches
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {departmentStats.map(dept => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {operationsBranchStats.map(branch => (
               <div 
-                key={dept.id}
-                onClick={() => onNavigateToTab && onNavigateToTab('team_performance')}
-                className="p-3.5 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-100 hover:border-slate-300 cursor-pointer transition relative group"
+                key={branch.id}
+                onClick={() => onNavigateToTab && onNavigateToTab('all_tasks')}
+                className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3 cursor-pointer hover:border-emerald-300 transition"
               >
-                {dept.overdue > 0 && (
-                  <span 
-                    title={`${dept.overdue} overdue task(s)`}
-                    className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse"
-                  />
-                )}
-
-                <p className="text-xs font-bold text-slate-900 truncate">{dept.name}</p>
-                {dept.headName ? (
-                  <p className="text-[11px] text-slate-500 truncate mt-0.5">{dept.headName}</p>
-                ) : null}
-
-                <div className="mt-3 flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-700">{dept.completed} / {dept.total}</span>
-                  <span className="text-[11px] font-bold text-[#05331F]">{dept.rate}%</span>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-50 text-[#05331F] flex items-center justify-center font-bold">
+                      {branch.id === 'warehouse' ? <Package className="w-3.5 h-3.5" /> :
+                       branch.id === 'transportation' ? <Truck className="w-3.5 h-3.5" /> :
+                       branch.id === 'service' ? <Wrench className="w-3.5 h-3.5" /> : <Layers className="w-3.5 h-3.5" />}
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-xs text-slate-900">{branch.name}</h3>
+                      <p className="text-[10px] text-slate-400">{branch.headName}</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-[#05331F]">{branch.rate}%</span>
                 </div>
 
-                <div className="w-full bg-slate-200 h-1 rounded-full mt-1.5 overflow-hidden">
+                <div className="grid grid-cols-3 gap-1 text-center">
+                  <div className="p-1.5 rounded-xl bg-slate-50">
+                    <span className="text-[10px] text-slate-400 block">Total</span>
+                    <strong className="text-xs text-slate-800">{branch.total}</strong>
+                  </div>
+                  <div className="p-1.5 rounded-xl bg-emerald-50/60">
+                    <span className="text-[10px] text-emerald-700 block">Done</span>
+                    <strong className="text-xs text-emerald-800">{branch.completed}</strong>
+                  </div>
+                  <div className="p-1.5 rounded-xl bg-rose-50/60">
+                    <span className="text-[10px] text-rose-700 block">Overdue</span>
+                    <strong className="text-xs text-rose-800">{branch.overdue}</strong>
+                  </div>
+                </div>
+
+                {/* Micro progress bar */}
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
                   <div 
-                    className={`h-full ${dept.rate === 100 ? 'bg-[#10B981]' : 'bg-[#05331F]'}`}
-                    style={{ width: `${dept.rate}%` }}
+                    className="bg-emerald-600 h-1.5 rounded-full transition-all" 
+                    style={{ width: `${branch.rate}%` }} 
                   />
                 </div>
               </div>
@@ -481,49 +554,20 @@ export default function CompanyDashboardView({
         </div>
       )}
 
-      {/* CASE B: DEPARTMENT SCOPE -> Team Cards */}
-      {scope === SCOPES.DEPARTMENT && departmentTeamStats.length > 0 && (
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900">Department Squads</h2>
-              <p className="text-xs text-slate-500">Live throughput for teams in your department</p>
-            </div>
-            <button
-              onClick={() => onNavigateToTab && onNavigateToTab('teams')}
-              className="text-xs font-semibold text-[#05331F] hover:underline"
-            >
-              Manage Teams
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {departmentTeamStats.map(tm => (
-              <div key={tm.id} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
-                <p className="text-xs font-bold text-slate-900">{tm.name}</p>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-600">{tm.completed} / {tm.total} Done</span>
-                  <span className="font-bold text-[#05331F]">{tm.rate}%</span>
-                </div>
-                <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden">
-                  <div className="bg-[#05331F] h-full" style={{ width: `${tm.rate}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* CASE C: DOWNLINE SCOPE OR HR MANAGEMENT -> Squad Table */}
-      {(scope === SCOPES.DOWNLINE || isHRManager) && squadMembersStats.length > 0 && (
+      {/* 5. SQUAD TABLE FOR MANAGERS AND SUPERVISORS (Hide if no data) */}
+      {(isAccountsManager || isOperationsBranchManager || isOperationsSupervisor || isHRManager) && squadMembersStats.length > 0 && (
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-sm font-bold text-slate-900">
-                {isHRManager ? 'HR & Administration Squad' : 'Your Squad Performance'}
+                {isAccountsManager 
+                  ? 'Finance & Accounts Squad Performance' 
+                  : isOperationsBranchManager 
+                  ? `${currentUser.role.replace(' Manager', '').replace(' In-charge', '')} Squad Performance` 
+                  : 'Your Team Squad'}
               </h2>
               <p className="text-xs text-slate-500">
-                {isHRManager ? "Direct downline task throughput across HR & Admin team" : "Today's direct downline task execution"}
+                Direct downline execution, overdue tracking and completion status
               </p>
             </div>
             {canAccess(currentUser, PAGES.TEAM_PERFORMANCE) && (
@@ -542,9 +586,10 @@ export default function CompanyDashboardView({
               <thead className="bg-slate-50/70 border-b border-slate-100 text-slate-500 font-semibold uppercase text-[10px]">
                 <tr>
                   <th className="py-2.5 px-3">Member</th>
-                  <th className="py-2.5 px-3">Designation</th>
-                  <th className="py-2.5 px-3 text-center">Today's Tasks</th>
+                  <th className="py-2.5 px-3">Role</th>
+                  <th className="py-2.5 px-3 text-center">Tasks Done / Total</th>
                   <th className="py-2.5 px-3 text-center">Overdue</th>
+                  <th className="py-2.5 px-3 text-center">In Review</th>
                   <th className="py-2.5 px-3 text-right">Status</th>
                 </tr>
               </thead>
@@ -561,10 +606,18 @@ export default function CompanyDashboardView({
                         <span className="text-slate-400">0</span>
                       )}
                     </td>
+                    <td className="py-2.5 px-3 text-center">
+                      {m.inReview > 0 ? (
+                        <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">{m.inReview}</span>
+                      ) : (
+                        <span className="text-slate-400">0</span>
+                      )}
+                    </td>
                     <td className="py-2.5 px-3 text-right">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
                         m.status === 'All Complete' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
                         m.status === 'Needs Attention' ? 'bg-rose-50 text-rose-800 border-rose-200' :
+                        m.status === 'In Review' ? 'bg-blue-50 text-blue-800 border-blue-200' :
                         m.status === 'In Progress' ? 'bg-amber-50 text-amber-800 border-amber-200' :
                         'bg-slate-50 text-slate-500 border-slate-200'
                       }`}>
@@ -579,7 +632,83 @@ export default function CompanyDashboardView({
         </div>
       )}
 
-      {/* 4. Two-Column Row: My To-Dos & Recent Activity (or Next Deadlines for Self Scope) */}
+      {/* 6. FRONTLINE DASHBOARD: Large Action Cards (Loading Staff, Driver, Technician, Storekeeper) */}
+      {isFrontline && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-900">Today's Assigned Work</h2>
+            {nextFrontlineDeadline && (
+              <span className="text-xs bg-amber-50 text-amber-900 font-bold px-3 py-1 rounded-full border border-amber-200">
+                Next Deadline: {nextFrontlineDeadline.deadlineDate}
+              </span>
+            )}
+          </div>
+
+          {frontlineTasks.length === 0 ? (
+            <div className="bg-white rounded-2xl p-8 text-center border border-slate-200 text-slate-400 space-y-2">
+              <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500/50" />
+              <p className="font-semibold text-sm text-slate-700">All tasks completed!</p>
+              <p className="text-xs">No pending operations tasks assigned to you right now.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {frontlineTasks.map(task => (
+                <div 
+                  key={task.id}
+                  onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
+                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3 cursor-pointer hover:border-slate-300 transition"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+                      {task.taskType || 'Operation'}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                      task.status === 'In Progress' 
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : 'bg-slate-50 text-slate-700 border-slate-200'
+                    }`}>
+                      {task.status}
+                    </span>
+                  </div>
+
+                  <h3 className="font-bold text-sm text-slate-900">{task.title}</h3>
+                  {task.description && (
+                    <p className="text-xs text-slate-600 line-clamp-2">{task.description}</p>
+                  )}
+
+                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs flex items-center justify-between text-slate-500">
+                    <span>Deadline: <strong className="text-slate-800">{task.deadlineDate || 'Today'}</strong></span>
+                    {task.location && <span>Location: <strong className="text-slate-800">{task.location}</strong></span>}
+                  </div>
+
+                  {/* Large Buttons */}
+                  <div className="grid grid-cols-2 gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
+                      className="py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 min-h-[48px]"
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      <span>Start / Update</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
+                      className="py-2.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white font-bold text-xs flex items-center justify-center gap-1.5 min-h-[48px]"
+                    >
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Submit Done</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 7. Two-Column Row: My To-Dos & Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Compact "My To-Dos" Card */}
@@ -587,150 +716,132 @@ export default function CompanyDashboardView({
           <div>
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
-                <CheckSquare className="w-4 h-4 text-emerald-700" />
-                <h3 className="text-sm font-bold text-slate-900">My To-Dos</h3>
+                <CheckSquare className="w-4 h-4 text-[#05331F]" />
+                <h3 className="font-bold text-sm text-slate-900">My To-Dos</h3>
               </div>
-              <button 
+              <button
                 onClick={() => onNavigateToTab && onNavigateToTab('todos')}
-                className="text-xs text-[#05331F] font-semibold hover:underline"
+                className="text-xs font-semibold text-[#05331F] hover:underline flex items-center gap-0.5"
               >
-                View all ({todos.filter(t => !t.done).length})
+                <span>Planner</span>
+                <ArrowRight className="w-3 h-3" />
               </button>
             </div>
 
-            <div className="divide-y divide-slate-100 mt-2">
-              {openTodos.length === 0 ? (
-                <div className="py-6 text-center text-xs text-slate-400">
-                  No pending to-dos. You're all caught up!
-                </div>
-              ) : (
-                openTodos.map(todo => (
-                  <div key={todo.id} className="py-2.5 flex items-start gap-2.5 group">
-                    <button
-                      onClick={() => onToggleTodoDone && onToggleTodoDone(todo.id, !todo.done)}
-                      className="mt-0.5 w-4 h-4 rounded-md border border-slate-300 hover:border-emerald-700 flex items-center justify-center shrink-0 cursor-pointer"
-                    >
-                      {todo.done && <Check className="w-3 h-3 text-emerald-700" />}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-slate-800 font-medium truncate">{todo.title}</p>
-                      {todo.dueAtDate && (
-                        <p className="text-[10px] text-slate-400">
-                          Due: {todo.dueAtDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </p>
-                      )}
+            {/* Quick add input */}
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (dashQuickTodo.trim() && onQuickAddTodo) {
+                  onQuickAddTodo(dashQuickTodo.trim());
+                  setDashQuickTodo('');
+                }
+              }}
+              className="flex items-center gap-2 my-3"
+            >
+              <input
+                type="text"
+                placeholder="Add a personal to-do for today..."
+                value={dashQuickTodo}
+                onChange={(e) => setDashQuickTodo(e.target.value)}
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-[#05331F]"
+              />
+              <button
+                type="submit"
+                disabled={!dashQuickTodo.trim()}
+                className="px-3 py-1.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white font-bold text-xs disabled:opacity-40 transition"
+              >
+                Add
+              </button>
+            </form>
+
+            {/* Open to-dos list */}
+            {openTodos.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-4">No open to-dos. You're all clear!</p>
+            ) : (
+              <div className="space-y-2">
+                {openTodos.map(todo => (
+                  <div 
+                    key={todo.id}
+                    onClick={() => onToggleTodoDone && onToggleTodoDone(todo.id, !todo.done)}
+                    className="p-2.5 rounded-xl bg-slate-50/70 hover:bg-slate-100/80 cursor-pointer flex items-center justify-between transition text-xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-4 h-4 rounded-md border border-slate-300 flex items-center justify-center bg-white shrink-0">
+                        {todo.done && <Check className="w-3 h-3 text-[#05331F]" />}
+                      </div>
+                      <span className={`truncate font-medium text-slate-800 ${todo.done ? 'line-through text-slate-400' : ''}`}>
+                        {todo.title}
+                      </span>
                     </div>
+                    {todo.dueAtDate && (
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">
+                        {todo.dueAtDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      </span>
+                    )}
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Quick Add To-Do Input */}
-          <form onSubmit={handleDashQuickSubmit} className="pt-3 border-t border-slate-100 flex gap-2">
-            <input
-              type="text"
-              placeholder="+ Add a quick to-do..."
-              value={dashQuickTodo}
-              onChange={(e) => setDashQuickTodo(e.target.value)}
-              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-[#05331F]"
-            />
-            <button
-              type="submit"
-              className="px-3 py-1.5 bg-[#05331F] hover:bg-[#07472B] text-white text-xs font-semibold rounded-xl"
-            >
-              Add
-            </button>
-          </form>
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+            <span>Private to your account</span>
+            <span>{todos.filter(t => t.done).length} completed</span>
+          </div>
         </div>
 
-        {/* Right Card: Next Deadlines (for Self) OR Recent Activity (for Others) */}
-        {scope === SCOPES.SELF ? (
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+        {/* Recent Operational Highlights Card */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3 flex flex-col justify-between">
+          <div>
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-emerald-700" />
-                <h3 className="text-sm font-bold text-slate-900">Upcoming Task Deadlines</h3>
+                <h3 className="font-bold text-sm text-slate-900">Today's Execution Activity</h3>
               </div>
-              <button 
-                onClick={() => onNavigateToTab && onNavigateToTab('my_tasks')}
-                className="text-xs text-[#05331F] font-semibold hover:underline"
-              >
-                Open Daily Sheet
-              </button>
+              <span className="text-xs text-slate-400 font-medium">{todayTasks.length} active tasks</span>
             </div>
 
-            <div className="divide-y divide-slate-100">
-              {myNextDeadlines.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">
-                  No upcoming deadlines pending.
-                </div>
-              ) : (
-                myNextDeadlines.map(t => (
-                  <div key={t.id} onClick={() => onOpenTaskDetails && onOpenTaskDetails(t)} className="py-2.5 flex items-center justify-between cursor-pointer hover:bg-slate-50/70 p-1.5 rounded-lg transition">
-                    <div className="min-w-0 pr-2">
-                      <p className="text-xs font-semibold text-slate-800 truncate">{t.title}</p>
-                      <p className="text-[10px] text-slate-400">Priority: {t.priority || 'Medium'}</p>
-                    </div>
-                    <span className="text-[11px] font-bold text-[#05331F] shrink-0 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
-                      {t.deadlineDate || 'Today'}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-700" />
-                <h3 className="text-sm font-bold text-slate-900">Recent Operational Activity</h3>
-              </div>
-              <button 
-                onClick={() => onNavigateToTab && onNavigateToTab('my_tasks')}
-                className="text-xs text-[#05331F] font-semibold hover:underline"
-              >
-                View all tasks
-              </button>
-            </div>
-
-            <div className="divide-y divide-slate-100">
-              {recentActivities.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">
-                  No recent task activity recorded yet.
-                </div>
-              ) : (
-                recentActivities.map(task => (
+            {todayTasks.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6">No task activities logged yet today.</p>
+            ) : (
+              <div className="space-y-2 mt-3 max-h-56 overflow-y-auto">
+                {todayTasks.slice(0, 5).map(task => (
                   <div 
                     key={task.id}
                     onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
-                    className="py-2.5 flex items-center justify-between cursor-pointer hover:bg-slate-50/70 p-1.5 rounded-lg transition"
+                    className="p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 cursor-pointer transition flex items-center justify-between text-xs"
                   >
-                    <div className="min-w-0 pr-3">
-                      <p className="text-xs font-semibold text-slate-800 truncate">{task.title}</p>
-                      <p className="text-[10px] text-slate-400 truncate">
-                        {task.assignedToName || 'Unassigned'} {' \u00B7 '} {task.departmentId || task.department || 'Operations'}
+                    <div className="min-w-0 pr-2">
+                      <p className="font-bold text-slate-800 truncate">{task.title}</p>
+                      <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                        {task.assignedToName || 'Unassigned'} • {task.department || 'Operations'}
                       </p>
                     </div>
-
-                    <div className="text-right shrink-0">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                        task.status === TASK_STATUSES.COMPLETED || task.status === 'Completed'
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                          : task.status === 'Blocked'
-                          ? 'bg-rose-50 text-rose-800 border-rose-200'
-                          : 'bg-amber-50 text-amber-800 border-amber-200'
-                      }`}>
-                        {task.status}
-                      </span>
-                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+                      task.status === TASK_STATUSES.COMPLETED || task.status === 'Completed' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                      task.status === TASK_STATUSES.PENDING_REVIEW || task.status === 'Pending Review' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                      task.status === 'Payment Hold' ? 'bg-rose-50 text-rose-800 border-rose-200' :
+                      'bg-slate-100 text-slate-700 border-slate-200'
+                    }`}>
+                      {task.status}
+                    </span>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+            <span className="text-slate-500">Live operational ledger</span>
+            <button
+              onClick={() => onNavigateToTab && onNavigateToTab('all_tasks')}
+              className="font-bold text-[#05331F] hover:underline"
+            >
+              View all tasks →
+            </button>
+          </div>
+        </div>
 
       </div>
 

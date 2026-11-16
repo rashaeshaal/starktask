@@ -4,9 +4,9 @@
  * 
  * Scopes:
  * - "company": Universal company-wide oversight (Director Operations, Executive Director)
- * - "department": Department-wide oversight (Department Heads like CSO, Operations Head, Accounts Manager, Brand Manager, Service Manager, etc.)
- * - "downline": Downline tree hierarchy oversight (SSM, ASM, team leaders / supervisors)
- * - "self": Frontline personnel (Sales Coordinator, Accountant, Driver, Loading Staff, Technician, etc.)
+ * - "department": Department-wide oversight (Operations Head, CSO, Accounts Manager, Brand Manager, etc.)
+ * - "downline": Downline tree hierarchy oversight (Warehouse In-charge, Transport Manager, Service Manager, Inventory Supervisor, SSM, ASM, Supervisors)
+ * - "self": Frontline personnel (Loading Staff, Driver, Technician, Storekeeper, Operations Assistant, Sales Coordinator, Accountant)
  */
 
 export const SCOPES = {
@@ -35,7 +35,6 @@ export const PAGES = {
 /**
  * 1. Single Array of All-Access Performance Roles:
  * Only roles listed here see ALL 10 departments and the department filter in Team Performance.
- * HR/Admin and General Manager do NOT get company-wide performance by default.
  */
 export const ALL_ACCESS_PERFORMANCE_ROLES = [
   'Executive Director',
@@ -82,7 +81,6 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageOrgStructure: true
   },
 
-  // General Manager & HR/Admin: Company operational scope, but their Team Performance is Department/Team
   'General Manager': {
     scope: SCOPES.COMPANY,
     performanceScope: SCOPES.DEPARTMENT,
@@ -97,6 +95,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageEmployees: true,
     canManageOrgStructure: true
   },
+
   // --- HR & Administration Branch ---
   'HR Manager': {
     scope: SCOPES.COMPANY,
@@ -201,78 +200,28 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageOrgStructure: false
   },
 
-  // Department Heads: Department Scope
-  'Chief Sales Officer': {
-    scope: SCOPES.DEPARTMENT,
-    performanceScope: SCOPES.DEPARTMENT,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.DEALERS, PAGES.BOOKINGS, PAGES.REPORTS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'CSO': {
-    scope: SCOPES.DEPARTMENT,
-    performanceScope: SCOPES.DEPARTMENT,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.DEALERS, PAGES.BOOKINGS, PAGES.REPORTS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
+  // --- OPERATIONS DEPARTMENT (Task Management Only) ---
+  // Operations Head: Universal oversight of entire Operations & 4 branches
   'Operations Head': {
     scope: SCOPES.DEPARTMENT,
     performanceScope: SCOPES.DEPARTMENT,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.REPORTS
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.APPROVALS,
+      PAGES.ESCALATIONS, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS, PAGES.REPORTS
     ],
     canAssign: true,
     canApprove: true,
     canManageTeams: true,
     canManageEmployees: false
   },
-  'Accounts Manager': {
-    scope: SCOPES.DEPARTMENT,
-    performanceScope: SCOPES.DEPARTMENT,
+
+  // Operations Branch Managers (Branch scope: downline only, no cross-branch)
+  'Warehouse In-charge': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.REPORTS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'Brand Manager': {
-    scope: SCOPES.DEPARTMENT,
-    performanceScope: SCOPES.DEPARTMENT,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.TODOS, PAGES.TEAMS, PAGES.REPORTS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'Service Manager': {
-    scope: SCOPES.DEPARTMENT,
-    performanceScope: SCOPES.DEPARTMENT,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.REPORTS
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS
     ],
     canAssign: true,
     canApprove: true,
@@ -280,25 +229,35 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageEmployees: false
   },
   'Transport Manager': {
-    scope: SCOPES.DEPARTMENT,
-    performanceScope: SCOPES.DEPARTMENT,
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.REPORTS
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS
     ],
     canAssign: true,
     canApprove: true,
     canManageTeams: false,
     canManageEmployees: false
   },
-  'Warehouse In-charge': {
-    scope: SCOPES.DEPARTMENT,
-    performanceScope: SCOPES.DEPARTMENT,
+  'Service Manager': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.REPORTS
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'Inventory Supervisor': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS
     ],
     canAssign: true,
     canApprove: true,
@@ -306,67 +265,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageEmployees: false
   },
 
-  // Downline Leadership: Downline Scope (sees self + people under them)
-  'State Sales Manager': {
-    scope: SCOPES.DOWNLINE,
-    performanceScope: SCOPES.DOWNLINE,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
-      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'SSM': {
-    scope: SCOPES.DOWNLINE,
-    performanceScope: SCOPES.DOWNLINE,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
-      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'Asst Sales Manager': {
-    scope: SCOPES.DOWNLINE,
-    performanceScope: SCOPES.DOWNLINE,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
-      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'ASM': {
-    scope: SCOPES.DOWNLINE,
-    performanceScope: SCOPES.DOWNLINE,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
-      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'Area Sales Manager': {
-    scope: SCOPES.DOWNLINE,
-    performanceScope: SCOPES.DOWNLINE,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
-      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
+  // Operations Supervisors & Coordinators (Downline scope)
   'Warehouse Supervisor': {
     scope: SCOPES.DOWNLINE,
     performanceScope: SCOPES.DOWNLINE,
@@ -403,55 +302,9 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageTeams: false,
     canManageEmployees: false
   },
-  'Leads Coordinator': {
-    scope: SCOPES.DOWNLINE,
-    performanceScope: SCOPES.DOWNLINE,
-    menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
-      PAGES.TODOS, PAGES.TEAMS
-    ],
-    canAssign: true,
-    canApprove: true,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
 
-  // Frontline / Self Scope (NO downline): Team Performance is HIDDEN
-  'Sales Coordinator': {
-    scope: SCOPES.SELF,
-    performanceScope: null,
-    menu: [
-      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.DEALERS, PAGES.BOOKINGS
-    ],
-    canAssign: false,
-    canApprove: false,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'Accountant': {
-    scope: SCOPES.SELF,
-    performanceScope: null,
-    menu: [
-      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS
-    ],
-    canAssign: false,
-    canApprove: false,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'Junior Accountant': {
-    scope: SCOPES.SELF,
-    performanceScope: null,
-    menu: [
-      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS
-    ],
-    canAssign: false,
-    canApprove: false,
-    canManageTeams: false,
-    canManageEmployees: false
-  },
-  'Driver': {
+  // Operations Frontline Roles & Assistant: Self Scope (Team Performance and Assign are HIDDEN)
+  'Operations Assistant': {
     scope: SCOPES.SELF,
     performanceScope: null,
     menu: [
@@ -463,6 +316,17 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageEmployees: false
   },
   'Loading Staff': {
+    scope: SCOPES.SELF,
+    performanceScope: null,
+    menu: [
+      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS
+    ],
+    canAssign: false,
+    canApprove: false,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'Driver': {
     scope: SCOPES.SELF,
     performanceScope: null,
     menu: [
@@ -495,6 +359,120 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageTeams: false,
     canManageEmployees: false
   },
+
+  // --- SALES DEPARTMENT ---
+  'Chief Sales Officer': {
+    scope: SCOPES.DEPARTMENT,
+    performanceScope: SCOPES.DEPARTMENT,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
+      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
+      PAGES.DEALERS, PAGES.BOOKINGS, PAGES.REPORTS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'CSO': {
+    scope: SCOPES.DEPARTMENT,
+    performanceScope: SCOPES.DEPARTMENT,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
+      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
+      PAGES.DEALERS, PAGES.BOOKINGS, PAGES.REPORTS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'State Sales Manager': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'SSM': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'Area Sales Manager': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'ASM': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS, PAGES.DEALERS, PAGES.BOOKINGS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'Sales Coordinator': {
+    scope: SCOPES.SELF,
+    performanceScope: null,
+    menu: [
+      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS,
+      PAGES.DEALERS, PAGES.BOOKINGS
+    ],
+    canAssign: false,
+    canApprove: false,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+
+  // --- MARKETING DEPARTMENT ---
+  'Brand Manager': {
+    scope: SCOPES.DEPARTMENT,
+    performanceScope: SCOPES.DEPARTMENT,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
+      PAGES.APPROVALS, PAGES.TODOS, PAGES.TEAMS, PAGES.REPORTS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'Leads Coordinator': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
   'Graphic Designer': {
     scope: SCOPES.SELF,
     performanceScope: null,
@@ -516,6 +494,43 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canApprove: false,
     canManageTeams: false,
     canManageEmployees: false
+  },
+
+  // --- FINANCE & ACCOUNTS ---
+  'Accounts Manager': {
+    scope: SCOPES.DEPARTMENT,
+    performanceScope: SCOPES.DEPARTMENT,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
+      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
+      PAGES.REPORTS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'Accountant': {
+    scope: SCOPES.SELF,
+    performanceScope: null,
+    menu: [
+      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS
+    ],
+    canAssign: false,
+    canApprove: false,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'Junior Accountant': {
+    scope: SCOPES.SELF,
+    performanceScope: null,
+    menu: [
+      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS
+    ],
+    canAssign: false,
+    canApprove: false,
+    canManageTeams: false,
+    canManageEmployees: false
   }
 };
 
@@ -528,6 +543,11 @@ export function normalizeRoleName(role) {
   if (r === 'CSO' || r === 'Chief Sales Officer') return 'CSO';
   if (r === 'SSM' || r === 'State Sales Manager' || r === 'Senior Sales Manager') return 'SSM';
   if (r === 'ASM' || r === 'Asst Sales Manager' || r === 'Assistant Sales Manager' || r === 'Area Sales Manager') return 'ASM';
+  if (r === 'Delivery Partner') return 'Driver';
+  if (r === 'Service Technician') return 'Technician';
+  if (r === 'Warehouse Executive' || r === 'QC Supervisor' || r === 'Dispatch Supervisor') return 'Warehouse Supervisor';
+  if (r === 'Accounts Executive') return 'Accounts Manager';
+  if (r === 'Junior Accountant') return 'Accountant';
   return r;
 }
 
@@ -551,15 +571,18 @@ export function getRoleConfig(user) {
   if (role.toLowerCase().includes('director') || role.toLowerCase().includes('general manager')) {
     return ROLE_PERMISSIONS_CONFIG['Director Operations'];
   }
-  if (role.toLowerCase().includes('head') || role.toLowerCase().includes('manager')) {
+  if (role.toLowerCase().includes('operations head')) {
     return ROLE_PERMISSIONS_CONFIG['Operations Head'];
+  }
+  if (role.toLowerCase().includes('head') || role.toLowerCase().includes('manager')) {
+    return ROLE_PERMISSIONS_CONFIG['Warehouse In-charge'];
   }
   if (role.toLowerCase().includes('coordinator') || role.toLowerCase().includes('supervisor') || role.toLowerCase().includes('lead')) {
     return ROLE_PERMISSIONS_CONFIG['Warehouse Supervisor'];
   }
 
   // Default frontline
-  return ROLE_PERMISSIONS_CONFIG['Sales Coordinator'];
+  return ROLE_PERMISSIONS_CONFIG['Loading Staff'];
 }
 
 /**
@@ -616,21 +639,49 @@ export function canAccess(user, page) {
 }
 
 /**
+ * Operations Branch Hierarchy Helper
+ * Returns the exact branch roles that belong to a specific branch manager or supervisor.
+ */
+export function getOperationsBranchRoles(role) {
+  const norm = normalizeRoleName(role);
+  if (norm === 'Warehouse In-charge') {
+    return ['Warehouse Supervisor', 'Loading Staff'];
+  }
+  if (norm === 'Warehouse Supervisor') {
+    return ['Loading Staff'];
+  }
+  if (norm === 'Transport Manager') {
+    return ['Transport Coordinator', 'Driver'];
+  }
+  if (norm === 'Transport Coordinator') {
+    return ['Driver'];
+  }
+  if (norm === 'Service Manager') {
+    return ['Service Coordinator', 'Technician'];
+  }
+  if (norm === 'Service Coordinator') {
+    return ['Technician'];
+  }
+  if (norm === 'Inventory Supervisor') {
+    return ['Storekeeper'];
+  }
+  return [];
+}
+
+/**
  * Get visible user IDs for general queries and metrics computation
  */
 export function getVisibleUserIds(user, allEmployees = []) {
   if (!user) return [];
   const scope = getScope(user);
   const myId = String(user.id || user.uid || user.employeeId || '');
+  const userRole = normalizeRoleName(user.role || '');
 
   // 1. Company Scope: Sees all employees
-  // EXCEPTION: HR Manager & Admin Manager manage full company directory, but their own
-  // operational tasks and squad assignments are strictly limited to their own HR downline.
   if (scope === SCOPES.COMPANY) {
-    const roleNorm = normalizeRoleName(user.role || '');
-    if (roleNorm === 'HR Manager' || roleNorm === 'Admin Manager' || roleNorm === 'HR & Admin Manager') {
+    if (userRole === 'HR Manager' || userRole === 'Admin Manager' || userRole === 'HR & Admin Manager') {
       const hrBranchRoles = ['Admin Manager', 'HR Executive', 'Admin Executive', 'IT Head', 'Housekeeping', 'Housekeeper'];
-      const myAllowedRoles = roleNorm === 'Admin Manager' 
+      const myAllowedRoles = userRole === 'Admin Manager' 
         ? ['Admin Executive', 'IT Head', 'Housekeeping', 'Housekeeper']
         : hrBranchRoles;
 
@@ -652,11 +703,20 @@ export function getVisibleUserIds(user, allEmployees = []) {
     return ['all'];
   }
 
-  // 2. Department Scope: All employees in their department (CSO sees entire Sales team)
+  // 2. Department Scope:
+  // Operations Head sees all personnel across all 4 Operations branches
+  if (userRole === 'Operations Head') {
+    const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+    const opsEmployees = allEmployees.filter(e => {
+      const d = (e.department || e.departmentId || '').toLowerCase();
+      return opsDepts.includes(d) || d.includes('operation');
+    });
+    const ids = opsEmployees.map(e => String(e.id || e.uid || e.employeeId));
+    if (myId && !ids.includes(myId)) ids.push(myId);
+    return ids;
+  }
+
   if (scope === SCOPES.DEPARTMENT) {
-    const userRole = normalizeRoleName(user.role || '');
-    const userDept = (user.department || user.departmentId || '').toLowerCase();
-    
     // CSO sees all employees across all Sales hierarchy
     if (userRole === 'CSO') {
       const salesEmployees = allEmployees.filter(e => {
@@ -669,7 +729,7 @@ export function getVisibleUserIds(user, allEmployees = []) {
       return ids;
     }
 
-    // Brand Manager sees all Marketing roles: Leads Coordinator, Graphic Designer, Photographer
+    // Brand Manager sees all Marketing roles
     if (userRole === 'Brand Manager') {
       const mktRoles = ['Brand Manager', 'Leads Coordinator', 'Graphic Designer', 'Photographer'];
       const mktEmployees = allEmployees.filter(e => {
@@ -682,6 +742,20 @@ export function getVisibleUserIds(user, allEmployees = []) {
       return ids;
     }
 
+    // Accounts Manager sees only Finance & Accounts team
+    if (userRole === 'Accounts Manager') {
+      const finRoles = ['Accounts Manager', 'Accountant'];
+      const finEmployees = allEmployees.filter(e => {
+        const d = (e.department || e.departmentId || '').toLowerCase();
+        const r = normalizeRoleName(e.role || e.designation || '');
+        return d === 'finance' || d === 'accounts' || finRoles.includes(r);
+      });
+      const ids = finEmployees.map(e => String(e.id || e.uid || e.employeeId));
+      if (myId && !ids.includes(myId)) ids.push(myId);
+      return ids;
+    }
+
+    const userDept = (user.department || user.departmentId || '').toLowerCase();
     const deptEmployees = allEmployees.filter(e => {
       const eDept = (e.department || e.departmentId || '').toLowerCase();
       return eDept === userDept;
@@ -691,11 +765,23 @@ export function getVisibleUserIds(user, allEmployees = []) {
     return ids;
   }
 
-  // 3. Downline Scope: Recursive tree downline based on reportsTo / reportingManagerId
+  // 3. Downline Scope (Operations Branch Managers & Supervisors)
   if (scope === SCOPES.DOWNLINE) {
-    const userRole = normalizeRoleName(user.role || '');
+    // Operations Branch isolation
+    const opsBranchRoles = getOperationsBranchRoles(userRole);
+    if (opsBranchRoles.length > 0) {
+      const ids = new Set([myId]);
+      allEmployees.forEach(e => {
+        const eId = String(e.id || e.uid || e.employeeId);
+        const r = normalizeRoleName(e.role || e.designation || '');
+        if (opsBranchRoles.includes(r)) {
+          ids.add(eId);
+        }
+      });
+      return Array.from(ids);
+    }
 
-    // Leads Coordinator sees self + Graphic Designer and Photographer
+    // Marketing Leads Coordinator
     if (userRole === 'Leads Coordinator') {
       const allowedRoles = ['Leads Coordinator', 'Graphic Designer', 'Photographer'];
       const ids = new Set([myId]);
@@ -711,7 +797,6 @@ export function getVisibleUserIds(user, allEmployees = []) {
     }
 
     const downlineIds = new Set([myId]);
-    
     if (Array.isArray(user.downline)) {
       user.downline.forEach(id => downlineIds.add(String(id)));
     }
@@ -740,7 +825,6 @@ export function getVisibleUserIds(user, allEmployees = []) {
 
 /**
  * Specifically calculates visible employees for the TEAM PERFORMANCE page
- * Includes the leader's own row ("You") + downline / department / company
  */
 export function getPerformanceVisibleEmployees(user, allEmployees = []) {
   if (!user || !allEmployees) return [];
@@ -748,16 +832,22 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
   if (!perfScope) return [];
 
   const myId = String(user.id || user.uid || user.employeeId || '');
+  const userRole = normalizeRoleName(user.role || '');
 
   // 1. Company Scope (Director Operations, Executive Director) -> ALL employees
   if (perfScope === SCOPES.COMPANY) {
     return allEmployees;
   }
 
-  // 2. Department Scope -> Department employees including self (CSO sees entire Sales team)
+  // 2. Department Scope
   if (perfScope === SCOPES.DEPARTMENT) {
-    const userRole = normalizeRoleName(user.role || '');
-    const userDept = (user.department || user.departmentId || '').toLowerCase();
+    if (userRole === 'Operations Head') {
+      const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+      return allEmployees.filter(e => {
+        const d = (e.department || e.departmentId || '').toLowerCase();
+        return opsDepts.includes(d) || d.includes('operation');
+      });
+    }
 
     if (userRole === 'CSO') {
       return allEmployees.filter(e => {
@@ -767,7 +857,6 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
       });
     }
 
-    // Brand Manager sees all Marketing roles in Team Performance
     if (userRole === 'Brand Manager') {
       const mktRoles = ['Brand Manager', 'Leads Coordinator', 'Graphic Designer', 'Photographer'];
       return allEmployees.filter(e => {
@@ -777,7 +866,15 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
       });
     }
 
-    // HR Manager / Admin Manager sees their HR branch downline
+    if (userRole === 'Accounts Manager') {
+      const finRoles = ['Accounts Manager', 'Accountant'];
+      return allEmployees.filter(e => {
+        const d = (e.department || e.departmentId || '').toLowerCase();
+        const r = normalizeRoleName(e.role || e.designation || '');
+        return (d === 'finance' || d === 'accounts' || finRoles.includes(r)) && finRoles.includes(r);
+      });
+    }
+
     if (userRole === 'HR Manager' || userRole === 'Admin Manager' || userRole === 'HR & Admin Manager') {
       const hrBranchRoles = ['Admin Manager', 'HR Executive', 'Admin Executive', 'IT Head', 'Housekeeping', 'Housekeeper'];
       const myAllowedRoles = userRole === 'Admin Manager'
@@ -792,6 +889,7 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
       });
     }
 
+    const userDept = (user.department || user.departmentId || '').toLowerCase();
     return allEmployees.filter(e => {
       const eId = String(e.id || e.uid || e.employeeId);
       const eDept = (e.department || e.departmentId || '').toLowerCase();
@@ -799,11 +897,17 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
     });
   }
 
-  // 3. Downline Scope -> Self + recursive downline tree
+  // 3. Downline Scope
   if (perfScope === SCOPES.DOWNLINE) {
-    const userRole = normalizeRoleName(user.role || '');
+    const opsBranchRoles = getOperationsBranchRoles(userRole);
+    if (opsBranchRoles.length > 0) {
+      return allEmployees.filter(e => {
+        const eId = String(e.id || e.uid || e.employeeId);
+        const r = normalizeRoleName(e.role || e.designation || '');
+        return eId === myId || opsBranchRoles.includes(r);
+      });
+    }
 
-    // Leads Coordinator sees self + Graphic Designer and Photographer
     if (userRole === 'Leads Coordinator') {
       const allowedRoles = ['Leads Coordinator', 'Graphic Designer', 'Photographer'];
       return allEmployees.filter(e => {
@@ -833,49 +937,37 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
     }
 
     return allEmployees.filter(e => {
-      const eId = String(e.id || e.uid || e.employeeId);
-      return downlineIds.has(eId);
+      const empId = String(e.id || e.uid || e.employeeId);
+      return downlineIds.has(empId);
     });
   }
 
   return [];
 }
 
-/**
- * Universal Authority checks
- */
 export function canViewAll(user) {
   return isAllAccessPerformanceRole(user);
 }
 
-export function isGlobalManager(user) {
-  return getScope(user) === SCOPES.COMPANY;
-}
-
 export function isGlobalTeamManager(user) {
-  return getScope(user) === SCOPES.COMPANY;
+  if (!user) return false;
+  const role = user.role || '';
+  return role === 'Executive Director' || role === 'Director Operations' || role === 'General Manager' || role === 'HR Manager';
 }
 
-/**
- * Returns list of department objects or ids the user is authorized to manage
- */
 export function getAllowedManagementDepartments(user, allDepartments = []) {
   if (!user) return [];
-  const config = getRoleConfig(user);
-  if (!config || !config.canManageTeams) return [];
+  if (isGlobalTeamManager(user)) return allDepartments;
 
-  // Global / Company managers can manage teams across all departments
-  if (config.scope === SCOPES.COMPANY) {
-    return allDepartments;
+  const role = user.role || '';
+  if (role === 'Operations Head') {
+    const allowedOpsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+    return allDepartments.filter(d => {
+      const dId = (d.id || d.name || '').toLowerCase();
+      return allowedOpsDepts.includes(dId);
+    });
   }
 
-  // Operations Head manages operational squads
-  if (user.role === 'Operations Head') {
-    const allowed = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
-    return allDepartments.filter(d => allowed.includes((d.id || d.name || '').toLowerCase()));
-  }
-
-  // Department heads manage their own department
   const userDept = (user.department || user.departmentId || '').toLowerCase();
   return allDepartments.filter(d => {
     const dId = (d.id || d.name || '').toLowerCase();
@@ -923,7 +1015,21 @@ export function canUserAssignTo(assigner, assignee, allEmployees = []) {
     return true;
   }
 
-  // 2. Downline check: assigner can assign to anyone in their downline tree
+  // 2. Operations Head can assign to anyone in Operations
+  if (roleNorm === 'Operations Head') {
+    const d = (assignee.department || assignee.departmentId || '').toLowerCase();
+    const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+    return opsDepts.includes(d) || d.includes('operation');
+  }
+
+  // 3. Operations Branch Managers & Supervisors: strictly their branch downline
+  const opsBranchRoles = getOperationsBranchRoles(roleNorm);
+  if (opsBranchRoles.length > 0) {
+    const assigneeRole = normalizeRoleName(assignee.role || assignee.designation || '');
+    return opsBranchRoles.includes(assigneeRole);
+  }
+
+  // 4. Downline check: assigner can assign to anyone in their downline tree
   const visibleIds = getVisibleUserIds(assigner, allEmployees);
   const assigneeId = String(assignee.id || assignee.uid || assignee.employeeId);
   return visibleIds.includes(assigneeId);
@@ -937,7 +1043,7 @@ export function getAssignableEmployees(user, allEmployees = [], deptFilter = nul
   const myId = String(user.id || user.uid || user.employeeId);
   const roleNorm = normalizeRoleName(user.role || '');
 
-  // Top Universal Leadership (Director Operations, Executive Director) & CSO: assign company-wide / sales-wide
+  // Top Universal Leadership & CSO
   if (roleNorm === 'CSO' || roleNorm === 'Director Operations' || roleNorm === 'Executive Director') {
     return allEmployees.filter(e => {
       const id = String(e.id || e.uid || e.employeeId);
@@ -950,7 +1056,44 @@ export function getAssignableEmployees(user, allEmployees = [], deptFilter = nul
     });
   }
 
-  // HR Manager, Admin Manager & Downline supervisors: strictly their downline tree
+  // Operations Head can assign to ANYONE in all 4 operations branches
+  if (roleNorm === 'Operations Head') {
+    const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+    return allEmployees.filter(e => {
+      const id = String(e.id || e.uid || e.employeeId);
+      if (id === myId) return false;
+      const d = (e.department || e.departmentId || '').toLowerCase();
+      const inOps = opsDepts.includes(d) || d.includes('operation');
+      if (!inOps) return false;
+      if (deptFilter && deptFilter !== 'all') {
+        return d.includes(deptFilter.toLowerCase());
+      }
+      return true;
+    });
+  }
+
+  // Operations Branch Managers & Supervisors: strictly their branch downline
+  const opsBranchRoles = getOperationsBranchRoles(roleNorm);
+  if (opsBranchRoles.length > 0) {
+    return allEmployees.filter(e => {
+      const id = String(e.id || e.uid || e.employeeId);
+      if (id === myId) return false;
+      const r = normalizeRoleName(e.role || e.designation || '');
+      return opsBranchRoles.includes(r);
+    });
+  }
+
+  // Accounts Manager can assign only to Accountants
+  if (roleNorm === 'Accounts Manager') {
+    return allEmployees.filter(e => {
+      const id = String(e.id || e.uid || e.employeeId);
+      if (id === myId) return false;
+      const r = normalizeRoleName(e.role || e.designation || '');
+      return r === 'Accountant';
+    });
+  }
+
+  // HR Manager, Admin Manager & Downline supervisors
   const visibleIds = getVisibleUserIds(user, allEmployees);
   return allEmployees.filter(e => {
     const id = String(e.id || e.uid || e.employeeId);

@@ -2,20 +2,19 @@ import React, { useState } from 'react';
 import { 
   AlertTriangle, ShieldAlert, Clock, UserCheck, CheckCircle2, 
   ArrowUpRight, Send, AlertCircle, ChevronRight, Filter,
-  CornerDownRight, UserPlus, BellRing
+  CornerDownRight, UserPlus, BellRing, Wrench
 } from 'lucide-react';
-import { ESCALATION_MATRIX } from './sopRules';
 import { COMPANY_DEPARTMENTS } from './orgTree';
 
 /**
  * Clean & Actionable Operational Escalations View
- * Designed for Director Operations (IHJAS K) & Senior Leadership
+ * Designed for Director Operations (IHJAS K) & Operations Head (AKHIL K R)
  * 
- * Capabilities:
- * 1. Filter by department or status (Active vs Resolved)
- * 2. Real-time age tracking ("3 days stuck")
- * 3. Stuck assignee highlight
- * 4. "Nudge Assignee" and "Reassign Task" actions
+ * Tracks:
+ * 1. Operational Blockers
+ * 2. Overdue tasks in Operations & Company
+ * 3. Payment Holds
+ * 4. Nudge & Reassign actions
  */
 export default function EscalationsView({ 
   tasks = [], 
@@ -29,11 +28,22 @@ export default function EscalationsView({
   const [nudgedTaskIds, setNudgedTaskIds] = useState(new Set());
 
   const today = new Date().toISOString().split('T')[0];
+  const userRole = currentUser?.role || '';
+  const isOperationsHead = userRole === 'Operations Head';
 
-  // Extract real incidents from task blockers, overdue statuses, QC rejections, and payment holds
+  const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+
+  // Extract real incidents from task blockers, overdue statuses, and payment holds
   const incidentList = [];
 
   tasks.forEach(task => {
+    const taskDept = (task.departmentId || task.department || 'operations').toLowerCase();
+
+    // If viewer is Operations Head, restrict escalations strictly to Operations branches
+    if (isOperationsHead && !opsDepts.includes(taskDept)) {
+      return;
+    }
+
     const taskDate = (task.deadlineDate || task.createdAt || today).slice(0, 10);
     const ageDays = Math.max(1, Math.ceil((new Date() - new Date(taskDate)) / (1000 * 60 * 60 * 24)));
 
@@ -52,7 +62,7 @@ export default function EscalationsView({
         severity: 'Critical',
         ageDays,
         deadline: `${task.deadlineDate || ''} ${task.deadlineTime || ''}`,
-        escalationLevel: 'Director Operations',
+        escalationLevel: isOperationsHead ? 'Operations Head' : 'Director Operations',
         status: task.isResolved ? 'Resolved' : 'Active Escalation',
         reason: task.description || 'Task execution stopped due to operational impediment',
         timestamp: task.lastUpdated || task.createdAt
@@ -71,10 +81,10 @@ export default function EscalationsView({
         responsibleEmployee: task.assignedToName || 'Unassigned',
         responsibleEmployeeId: task.assignedToId || task.assignedTo,
         issue: `Task Overdue by ${ageDays} days`,
-        severity: task.priority === 'Critical' ? 'Critical' : 'High',
+        severity: task.priority === 'Critical' || task.priority === 'Urgent' ? 'Critical' : 'High',
         ageDays,
         deadline: `${task.deadlineDate} ${task.deadlineTime || '6:00 PM'}`,
-        escalationLevel: 'Director Operations',
+        escalationLevel: isOperationsHead ? 'Operations Head' : 'Director Operations',
         status: 'Active Escalation',
         reason: `Target deadline missed. Requires supervisor follow-up.`,
         timestamp: task.lastUpdated || task.createdAt
@@ -82,7 +92,7 @@ export default function EscalationsView({
     }
 
     // 3. Payment Holds
-    if (task.paymentStatus === 'Payment Hold' || task.accountsClearance === 'Payment Hold') {
+    if (!isOperationsHead && (task.paymentStatus === 'Payment Hold' || task.accountsClearance === 'Payment Hold')) {
       incidentList.push({
         id: `esc-pay-${task.id}`,
         taskId: task.id,
@@ -117,7 +127,6 @@ export default function EscalationsView({
     return true;
   });
 
-  // Nudge handler
   const handleNudge = (taskId) => {
     setNudgedTaskIds(prev => new Set([...prev, taskId]));
     alert(`Nudge reminder sent to responsible assignee.`);
@@ -129,9 +138,13 @@ export default function EscalationsView({
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Escalations & Blockers</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+            {isOperationsHead ? 'Operations Escalations & Blockers' : 'Escalations & Bottlenecks'}
+          </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Real-time tracking of overdue tasks, operational bottlenecks, payment holds, and delivery risks
+            {isOperationsHead 
+              ? 'Real-time tracking of overdue tasks, loading bottlenecks, and operational impediments across all 4 branches'
+              : 'Real-time tracking of overdue tasks, operational bottlenecks, payment holds, and delivery risks'}
           </p>
         </div>
 
@@ -142,7 +155,7 @@ export default function EscalationsView({
           <div className="flex items-center bg-white p-1 rounded-2xl border border-slate-200 shadow-2xs">
             <button
               onClick={() => setSelectedFilter('unresolved')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition min-h-[36px] ${
                 selectedFilter === 'unresolved'
                   ? 'bg-rose-700 text-white shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -152,7 +165,7 @@ export default function EscalationsView({
             </button>
             <button
               onClick={() => setSelectedFilter('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition min-h-[36px] ${
                 selectedFilter === 'all'
                   ? 'bg-[#05331F] text-white shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -162,134 +175,110 @@ export default function EscalationsView({
             </button>
           </div>
 
-          {/* Department Filter */}
-          <select
-            value={selectedDept}
-            onChange={(e) => setSelectedDept(e.target.value)}
-            className="px-3 py-2 text-xs bg-white border border-slate-200 rounded-2xl font-medium text-slate-700 focus:outline-none focus:border-[#05331F]"
-          >
-            <option value="all">All Departments</option>
-            {COMPANY_DEPARTMENTS.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
+          {/* Department Filter (Only for Company leadership) */}
+          {!isOperationsHead && (
+            <select
+              value={selectedDept}
+              onChange={(e) => setSelectedDept(e.target.value)}
+              className="bg-white border border-slate-200 rounded-2xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:border-[#05331F] min-h-[40px]"
+            >
+              <option value="all">All Departments</option>
+              {COMPANY_DEPARTMENTS.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          )}
+
         </div>
       </div>
 
-      {/* Incidents Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
-        {filteredIncidents.length === 0 ? (
-          <div className="p-12 text-center text-slate-400 space-y-2">
-            <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500" />
-            <p className="font-bold text-slate-800">Zero Active Escalations</p>
-            <p className="text-xs text-slate-500">
-              All factory operations and department deadlines are currently running on schedule.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50/70 border-b border-slate-100 text-slate-500 font-semibold">
-                  <th className="py-3 px-4">Severity & Age</th>
-                  <th className="py-3 px-4">Issue Details</th>
-                  <th className="py-3 px-4">Task Name</th>
-                  <th className="py-3 px-4">Department</th>
-                  <th className="py-3 px-4">Stuck Assignee</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredIncidents.map(inc => {
-                  const isNudged = nudgedTaskIds.has(inc.taskId);
+      {/* Incidents List */}
+      {filteredIncidents.length === 0 ? (
+        <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 text-slate-400 space-y-3">
+          <CheckCircle2 className="w-12 h-12 text-emerald-500/50 mx-auto" />
+          <h3 className="text-base font-bold text-slate-900">Zero Active Escalations</h3>
+          <p className="text-xs max-w-sm mx-auto">
+            {isOperationsHead
+              ? 'No blocked tasks or overdue orders reported across warehouse, transport, service or inventory.'
+              : 'All departments are executing within standard SOP parameters.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filteredIncidents.map(inc => {
+            const isNudged = nudgedTaskIds.has(inc.taskId);
 
-                  return (
-                    <tr key={inc.id} className="hover:bg-slate-50/70 transition">
-                      
-                      {/* Severity & Age */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            inc.severity === 'Critical' ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {inc.severity}
-                          </span>
-                          <span className="text-[11px] font-medium text-slate-400">
-                            {inc.ageDays}d old
-                          </span>
-                        </div>
-                      </td>
+            return (
+              <div 
+                key={inc.id}
+                className="bg-white rounded-2xl p-5 border border-slate-200 shadow-2xs hover:border-slate-300 transition space-y-3"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 text-rose-600" />
+                      <span>{inc.issue}</span>
+                    </span>
 
-                      {/* Issue */}
-                      <td className="py-3 px-4">
-                        <p className="font-bold text-slate-900">{inc.issue}</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5 max-w-xs truncate">{inc.reason}</p>
-                      </td>
+                    <span className="text-[11px] font-semibold bg-slate-100 px-2 py-0.5 rounded text-slate-700">
+                      {inc.department}
+                    </span>
 
-                      {/* Task Name */}
-                      <td className="py-3 px-4">
-                        <p className="font-semibold text-slate-800 max-w-xs truncate">{inc.taskTitle}</p>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">ID: {inc.taskId}</p>
-                      </td>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      Stuck for {inc.ageDays} {inc.ageDays === 1 ? 'day' : 'days'}
+                    </span>
+                  </div>
 
-                      {/* Department */}
-                      <td className="py-3 px-4">
-                        <span className="font-medium text-slate-700">{inc.department}</span>
-                      </td>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    Target: {inc.deadline}
+                  </span>
+                </div>
 
-                      {/* Stuck Assignee */}
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 font-bold text-[10px] flex items-center justify-center">
-                            {inc.responsibleEmployee.slice(0, 2).toUpperCase()}
-                          </div>
-                          <span className="font-semibold text-slate-800">{inc.responsibleEmployee}</span>
-                        </div>
-                      </td>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="md:col-span-2 space-y-1">
+                    <h4 className="font-bold text-sm text-slate-900">{inc.taskTitle}</h4>
+                    <p className="text-slate-600 leading-relaxed">{inc.reason}</p>
+                  </div>
 
-                      {/* Actions: Nudge & Reassign */}
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* Nudge button */}
-                          <button
-                            onClick={() => handleNudge(inc.taskId)}
-                            disabled={isNudged}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
-                              isNudged
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
-                            }`}
-                          >
-                            <BellRing className="w-3 h-3" />
-                            <span>{isNudged ? 'Nudged' : 'Nudge'}</span>
-                          </button>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
+                    <div className="text-slate-500">Responsible Assignee:</div>
+                    <div className="font-bold text-slate-800 text-sm">{inc.responsibleEmployee}</div>
+                    <div className="text-[10px] text-slate-400">Escalation Scope: {inc.escalationLevel}</div>
+                  </div>
+                </div>
 
-                          {/* Reassign button */}
-                          <button
-                            onClick={() => {
-                              if (onOpenAssignModal) {
-                                onOpenAssignModal({
-                                  title: `[Reassigned] ${inc.taskTitle}`,
-                                  description: `Reassigned from ${inc.responsibleEmployee} due to escalation: ${inc.issue}`,
-                                  memberId: ''
-                                });
-                              }
-                            }}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[#05331F] text-white hover:bg-[#07472B] transition"
-                          >
-                            <UserPlus className="w-3 h-3" />
-                            <span>Reassign</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => handleNudge(inc.taskId)}
+                    disabled={isNudged}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition disabled:opacity-50 min-h-[44px]"
+                  >
+                    <BellRing className="w-3.5 h-3.5 text-amber-600" />
+                    <span>{isNudged ? 'Nudged' : 'Nudge Assignee'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (onOpenAssignModal) {
+                        onOpenAssignModal({
+                          title: `Reassigned: ${inc.taskTitle}`,
+                          description: `Reassigned from ${inc.responsibleEmployee}. Previous issue: ${inc.issue}`,
+                          priority: 'High',
+                          department: inc.departmentId
+                        });
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-[#05331F] hover:bg-[#07472B] text-white rounded-xl font-bold text-xs shadow-2xs transition min-h-[44px]"
+                  >
+                    <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Reassign Task</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
     </div>
   );

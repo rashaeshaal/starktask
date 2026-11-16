@@ -2,9 +2,11 @@
  * Dev Test Matrix & Role Switcher for STARK STEEL DOORS (SalesDoor Enterprise)
  * Quality assurance testing tool for checking views of:
  * 1. Director Operations (IHJAS K) - Universal Company Scope
- * 2. State Sales Manager (RASHAD K) - Sales Downline Scope
- * 3. Asst Sales Manager (SHAMNA) - Sales Downline Scope
- * 4. Sales Coordinator (BINSHA E S) - Sales Self Scope
+ * 2. HR Manager (SHAHEEN NAZAR) & Admin Manager - HR Branch
+ * 3. Chief Sales Officer (ABDUL MAJEED) - Sales Department Scope
+ * 4. State Sales Manager (RASHAD K) & ASM (SHAMNA) - Sales Downline Scope
+ * 5. Sales Coordinator (BINSHA E S) - Sales Frontline Self Scope
+ * 6. Brand Manager, Leads Coordinator, Graphic Designer, Photographer - Marketing Department
  */
 
 import React, { useState } from 'react';
@@ -46,15 +48,48 @@ export const TEST_PERSONAS = [
     forbidden: ['Company-wide Task Assignment', 'Assign to HR Exec']
   },
   {
-    id: 'emp_155',
-    uid: 'emp_155',
-    fullName: 'HR Executive Test',
-    email: 'hr.exec@starkdoors.com',
-    role: 'HR Executive',
-    department: 'hr_admin',
+    id: 'emp_109',
+    uid: 'emp_109',
+    fullName: 'Brand Manager Test',
+    email: 'brand.mgr@starkdoors.com',
+    role: 'Brand Manager',
+    department: 'marketing',
+    expectedScope: SCOPES.DEPARTMENT,
+    allowed: ['Dashboard (Marketing Squad)', 'Team Performance (Marketing Only)', 'All Tasks (Requests Tab)', 'Approvals', 'My Tasks', 'To-Do', 'My Team', 'Reports (Marketing)'],
+    forbidden: ['Dealers', 'Bookings', 'Escalations', 'Employees Directory']
+  },
+  {
+    id: 'emp_180',
+    uid: 'emp_180',
+    fullName: 'SHARANYA V M',
+    email: 'sharanya@starkdoors.com',
+    role: 'Leads Coordinator',
+    department: 'marketing',
+    expectedScope: SCOPES.DOWNLINE,
+    allowed: ['Dashboard (Squad Table)', 'Team Performance (Under Team)', 'Approvals (Graphic Designer & Photographer)', 'My Tasks', 'To-Do', 'My Team'],
+    forbidden: ['Dealers', 'Bookings', 'Reports', 'Employees Directory', 'Assign to Brand Manager']
+  },
+  {
+    id: 'emp_155_design',
+    uid: 'emp_155_design',
+    fullName: 'IVIN C BIJI',
+    email: 'ivin@starkdoors.com',
+    role: 'Graphic Designer',
+    department: 'marketing',
     expectedScope: SCOPES.SELF,
-    allowed: ['Dashboard (My Tasks Today)', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
-    forbidden: ['Employees Directory', 'Assign Task', 'Manage Teams', 'Approvals', 'Reports']
+    allowed: ['Dashboard (Changes Requested / My Tasks)', 'My Tasks', 'To-Do', 'My Team (Read-only)', 'Request from Marketing'],
+    forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers', 'Bookings']
+  },
+  {
+    id: 'emp_156_photo',
+    uid: 'emp_156_photo',
+    fullName: 'Stark Photographer',
+    email: 'photographer@starkdoors.com',
+    role: 'Photographer',
+    department: 'marketing',
+    expectedScope: SCOPES.SELF,
+    allowed: ['Dashboard (Changes Requested / My Tasks)', 'My Tasks', 'To-Do', 'My Team (Read-only)', 'Request from Marketing'],
+    forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers', 'Bookings']
   },
   {
     id: 'emp_102',
@@ -99,6 +134,105 @@ export const TEST_PERSONAS = [
     expectedScope: SCOPES.SELF,
     allowed: ['Dashboard (My Tasks Today)', 'My Tasks', 'To-Do', 'My Team (Read-only)', 'Dealers', 'Bookings'],
     forbidden: ['Employees Directory', 'Approvals Queue', 'Escalations', 'Team Performance', 'Reports']
+  },
+  {
+    id: 'emp_113',
+    uid: 'emp_113',
+    fullName: 'AKHIL K R',
+    email: 'akhil@starkdoors.com',
+    role: 'Operations Head',
+    department: 'operations',
+    expectedScope: SCOPES.DEPARTMENT,
+    allowed: ['Dashboard (All 4 Branches)', 'Assign to Anyone in Operations', 'Team Performance (All Operations)', 'Approvals', 'Escalations', 'My Tasks', 'To-Do', 'My Team', 'Reports'],
+    forbidden: ['Dealers', 'Bookings', 'Employees Directory', 'Cross-Dept Assignment outside Operations']
+  },
+  {
+    id: 'emp_166',
+    uid: 'emp_166',
+    fullName: 'MUHAMMED SUHAIB',
+    email: 'suhaib@starkdoors.com',
+    role: 'Warehouse In-charge',
+    department: 'warehouse',
+    expectedScope: SCOPES.DOWNLINE,
+    allowed: ['Dashboard (Warehouse Squad)', 'Assign down Warehouse branch', 'From Sales Tab', 'Approvals', 'My Tasks', 'To-Do', 'My Team', 'Request from Branch'],
+    forbidden: ['Dealers', 'Bookings', 'Assign to Drivers/Technicians/Storekeeper']
+  },
+  {
+    id: 'emp_176',
+    uid: 'emp_176',
+    fullName: 'NAYAN RAM',
+    email: 'nayan@starkdoors.com',
+    role: 'Transport Manager',
+    department: 'transportation',
+    expectedScope: SCOPES.DOWNLINE,
+    allowed: ['Dashboard (Transport Squad)', 'Assign down Transport branch', 'From Sales Tab', 'Approvals', 'My Tasks', 'To-Do', 'My Team', 'Request from Branch'],
+    forbidden: ['Dealers', 'Bookings', 'Assign to Loading Staff/Technicians']
+  },
+  {
+    id: 'emp_116',
+    uid: 'emp_116',
+    fullName: 'AMAL KUMAR T K',
+    email: 'amal@starkdoors.com',
+    role: 'Service Manager',
+    department: 'service',
+    expectedScope: SCOPES.DOWNLINE,
+    allowed: ['Dashboard (Service Squad)', 'Assign down Service branch', 'Approvals', 'My Tasks', 'To-Do', 'My Team', 'Request from Branch'],
+    forbidden: ['Dealers', 'Bookings', 'Assign to Warehouse/Transport']
+  },
+  {
+    id: 'emp_175',
+    uid: 'emp_175',
+    fullName: 'TOBIN THOMAS',
+    email: 'tobin@starkdoors.com',
+    role: 'Inventory Supervisor',
+    department: 'inventory',
+    expectedScope: SCOPES.DOWNLINE,
+    allowed: ['Dashboard (Inventory Squad)', 'Assign down Inventory (Storekeeper)', 'Approvals', 'My Tasks', 'To-Do', 'My Team', 'Request from Branch'],
+    forbidden: ['Dealers', 'Bookings', 'Assign to Warehouse/Transport']
+  },
+  {
+    id: 'emp_122',
+    uid: 'emp_122',
+    fullName: 'MAHINDAR TUDU',
+    email: 'mahindar@starkdoors.com',
+    role: 'Loading Staff',
+    department: 'warehouse',
+    expectedScope: SCOPES.SELF,
+    allowed: ['Frontline Mobile UI (Large Start/Done Buttons)', 'Submit 10MB Photo Proof', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
+    forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers', 'Bookings']
+  },
+  {
+    id: 'emp_115',
+    uid: 'emp_115',
+    fullName: 'HAREESH BABU',
+    email: 'hareesh@starkdoors.com',
+    role: 'Driver',
+    department: 'transportation',
+    expectedScope: SCOPES.SELF,
+    allowed: ['Frontline Mobile UI (Large Start/Done Buttons)', 'Submit 10MB Photo Proof', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
+    forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers', 'Bookings']
+  },
+  {
+    id: 'emp_133',
+    uid: 'emp_133',
+    fullName: 'HARSHAL K B',
+    email: 'harshal@starkdoors.com',
+    role: 'Technician',
+    department: 'service',
+    expectedScope: SCOPES.SELF,
+    allowed: ['Frontline Mobile UI (Large Start/Done Buttons)', 'Submit 10MB Photo Proof', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
+    forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers', 'Bookings']
+  },
+  {
+    id: 'emp_189',
+    uid: 'emp_189',
+    fullName: 'APARNA V P',
+    email: 'aparna@starkdoors.com',
+    role: 'Operations Assistant',
+    department: 'operations',
+    expectedScope: SCOPES.SELF,
+    allowed: ['Dashboard (My Tasks Today)', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
+    forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers', 'Bookings']
   }
 ];
 

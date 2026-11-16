@@ -400,6 +400,81 @@ export async function updateFirestoreTask(taskId, updateData, user) {
     lastUpdated: timestamp,
     auditLogs: mergedLogs
   });
+
+  // Roll up progress to parent task if this was a subtask
+  const parentId = updateData.parentTaskId || existingData.parentTaskId;
+  if (parentId) {
+    try {
+      const subtasksQ = query(collection(db, TASKS_COL), where('parentTaskId', '==', parentId));
+      const subtasksSnap = await getDocs(subtasksQ);
+      if (!subtasksSnap.empty) {
+        let totalPct = 0;
+        let count = 0;
+        let allCompleted = true;
+        subtasksSnap.forEach(d => {
+          const sData = d.data();
+          const sPct = Number(sData.progressPercentage || 0);
+          totalPct += sPct;
+          count += 1;
+          if (sData.status !== 'Completed') {
+            allCompleted = false;
+          }
+        });
+        const rolledProgress = count > 0 ? Math.round(totalPct / count) : 0;
+        const parentRef = doc(db, TASKS_COL, parentId);
+        await updateDoc(parentRef, {
+          progressPercentage: rolledProgress,
+          ...(allCompleted ? { status: 'Completed' } : {}),
+          lastUpdated: timestamp
+        });
+      }
+    } catch (rollupErr) {
+      console.warn('Subtask progress rollup warning:', rollupErr);
+    }
+  }
+}
+
+/**
+ * Upload an attachment to Firebase Storage (images, pdfs, videos up to 25MB)
+ */
+export async function uploadTaskAttachment(file, taskId = 'general') {
+  if (!file) throw new Error('No file provided');
+  const MAX_SIZE = 25 * 1024 * 1024; // 25 MB
+  if (file.size > MAX_SIZE) {
+    throw new Error('File exceeds the 25 MB limit.');
+  }
+
+  const validTypes = ['image/', 'application/pdf', 'video/'];
+  const isValid = validTypes.some(t => file.type.startsWith(t) || file.type === t);
+  if (!isValid) {
+    throw new Error('Unsupported file format. Please upload an image, PDF, or video.');
+  }
+
+  const cleanName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const storagePath = `taskAttachments/${taskId}/${cleanName}`;
+  const storageRef = ref(storage, storagePath);
+
+  const uploadTask = uploadBytesResumable(storageRef, file, {
+    contentType: file.type
+  });
+
+  return new Promise((resolve, reject) => {
+    uploadTask.on(
+      'state_changed',
+      null,
+      (error) => reject(error),
+      async () => {
+        const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+        resolve({
+          name: file.name,
+          url: downloadUrl,
+          size: file.size,
+          type: file.type,
+          storagePath
+        });
+      }
+    );
+  });
 }
 
 /**
@@ -451,19 +526,32 @@ export async function createDealerBookingWithChain(bookingData, user) {
   const bookingRef = await addDoc(collection(db, DEALER_BOOKINGS_COL), bookingPayload);
   const bookingId = bookingRef.id;
 
-  // Linked Task 1: Verify Payment Token (Accounts Department)
+  // Linked Task 1: Verify Payment Token (Finance Department)
   const task1Id = await createFirestoreTask({
-    title: `[Token Clearance] ${bookingData.dealerName} - ${totalQuantity} Doors`,
-    description: `Verify advance payment token/credit clearance for required-by date: ${bookingData.requiredBy}. Delivery: ${bookingData.deliveryAddress}`,
+    title: `Verify payment token - ${bookingData.dealerName}`,
+    description: `Verify advance payment token/credit clearance for dealer booking #${bookingData.bookingCode || bookingId.slice(-6).toUpperCase()}. Salesperson: ${user.fullName || user.name}. Required-by date: ${bookingData.requiredBy}.`,
+    taskType: 'Payment verification',
+    reference: bookingData.bookingCode || bookingId.slice(-6).toUpperCase(),
+    partyName: bookingData.dealerName,
     department: 'finance',
     departmentId: 'finance',
     assignedToName: 'Accounts Manager',
     assignedToId: 'emp_106',
     priority: isAfter11AM ? 'High' : 'Medium',
     deadlineDate: bookingData.requiredBy,
+    requiredBy: bookingData.requiredBy,
+    isLinkedSalesWork: true,
+    salespersonName: user.fullName || user.name,
+    salespersonId: user.id || user.uid,
+    sourceBookingId: bookingId,
     bookingId,
-    dealerName: bookingData.dealerName,
-    quantity: totalQuantity,
+    attachments: bookingData.paymentSlipUrl ? [{
+      name: 'Payment Slip',
+      url: bookingData.paymentSlipUrl,
+      type: 'image/jpeg',
+      uploadedAt: timestamp
+    }] : [],
+    paymentSlipUrl: bookingData.paymentSlipUrl || null,
     taskCategory: 'stark_door_order'
   }, user);
 
@@ -477,6 +565,8 @@ export async function createDealerBookingWithChain(bookingData, user) {
     assignedToId: 'emp_166',
     priority: 'Medium',
     deadlineDate: bookingData.requiredBy,
+    requiredBy: bookingData.requiredBy,
+    isLinkedSalesWork: true,
     bookingId,
     parentTaskId: task1Id,
     dealerName: bookingData.dealerName,
@@ -494,6 +584,8 @@ export async function createDealerBookingWithChain(bookingData, user) {
     assignedToId: 'emp_176',
     priority: 'Medium',
     deadlineDate: bookingData.requiredBy,
+    requiredBy: bookingData.requiredBy,
+    isLinkedSalesWork: true,
     bookingId,
     parentTaskId: task2Id,
     dealerName: bookingData.dealerName,
