@@ -37,7 +37,7 @@ import TaskPulseTeamView from './TaskPulseTeamView';
 import AddEmployeeModal from './AddEmployeeModal';
 import SopTemplatesView from './SopTemplatesView';
 import EscalationsView from './EscalationsView';
-import TodoReminderView from './TodoReminderView';
+import TodoReminders from './TodoReminders';
 import DealersDirectoryView from './DealersDirectoryView';
 import PwaInstallPrompt from './PwaInstallPrompt';
 
@@ -461,21 +461,8 @@ export default function App() {
 
           {/* VIEW 3.9: To-Do & Reminders */}
           {activeTab === 'todos' && (
-            <TodoReminderView
+            <TodoReminders
               currentUser={activeEmployee}
-              departments={departments}
-              employees={employees}
-              onConvertToOfficialTask={(todo) => {
-                handleTaskCreated({
-                  title: todo.title,
-                  description: todo.description || '',
-                  priority: todo.priority || 'Medium',
-                  date: todayStr,
-                  taskDate: todayStr,
-                  status: 'In Progress'
-                });
-                setActiveTab('my_tasks');
-              }}
             />
           )}
 
