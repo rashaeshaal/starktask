@@ -23,14 +23,14 @@ export const RECURRING_COL = 'recurringTasks';
 export const ORG_SETTINGS_COL = 'organizationSettings';
 
 /**
- * Initializes the approved company structure (Departments & Designations) in Firestore.
- * Does NOT create fake employee accounts.
+ * Initializes the approved company structure (Departments, Designations, Users/Employees & Settings)
+ * in Firestore whenever a new Firebase database is connected.
  */
 export async function initializeCompanyStructure() {
   try {
     const deptsSnap = await getDocs(collection(db, DEPTS_COL));
     if (deptsSnap.empty) {
-      console.log('Initializing official company departments & designations in Firestore...');
+      console.log('Initializing official company structure in Cloud Firestore...');
       const batch = writeBatch(db);
 
       // 1. Departments
@@ -51,12 +51,24 @@ export async function initializeCompanyStructure() {
 
       // 3. Organization Settings Document
       batch.set(doc(db, ORG_SETTINGS_COL, 'general'), {
-        companyName: 'SalesDoor Enterprise',
+        companyName: 'STARK STEEL DOORS',
+        systemName: 'SalesDoor Enterprise',
+        sopVersion: '2.0',
         timezone: 'Asia/Kolkata',
         dailyCutoffTime: '23:59:59',
+        orderCutoffTime: '11:00 AM',
+        dailyTargetDoors: 70,
         initializedAt: serverTimestamp(),
         initialized: true
       });
+
+      await batch.commit();
+      console.log('Company structure successfully initialized in Cloud Firestore.');
+    }
+  } catch (err) {
+    console.error('Error during company structure initialization:', err);
+  }
+}
 
       await batch.commit();
       console.log('Company structure successfully initialized in Cloud Firestore.');
