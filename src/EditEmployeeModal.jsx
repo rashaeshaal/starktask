@@ -1,6 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { UserCheck, X, Building2, Shield, Phone, Mail, CheckCircle2, User, Trash2 } from 'lucide-react';
-import { saveEmployeeProfile } from './firestoreService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  X, UserCheck, Trash2, KeyRound, Loader2, AlertCircle, 
+  Building2, Briefcase, Phone, Mail, Calendar, Eye, EyeOff, Check
+} from 'lucide-react';
+import { apiResetEmployeePassword, apiSetEmployeeStatus } from './firebase';
+import { updateFirestoreTask } from './firestoreService';
+import { COMPANY_DEPARTMENTS, ORG_TREE, getRoleLevel, getParentRole } from './orgTree';
+import { canManageEmployees } from './permissions';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from './firebase';
 
 export default function EditEmployeeModal({ 
   isOpen, 
@@ -13,17 +21,26 @@ export default function EditEmployeeModal({
   onEmployeeUpdated,
   onEmployeeDeleted
 }) {
-  if (!isOpen || !employee) return null;
+  const isAuthorized = canManageEmployees(currentUser);
 
-  const [fullName, setFullName] = useState(employee.fullName || employee.name || '');
-  const [employeeId, setEmployeeId] = useState(employee.employeeId || '');
-  const [email, setEmail] = useState(employee.email || '');
-  const [phone, setPhone] = useState(employee.phone || '');
-  const [department, setDepartment] = useState(employee.department || employee.departmentId || departments[0]?.id || 'sales');
-  const [role, setRole] = useState(employee.role || 'Sales Coordinator');
-  const [employmentStatus, setEmploymentStatus] = useState(employee.employmentStatus || 'active');
-  const [reportingManagerId, setReportingManagerId] = useState(employee.reportingManagerId || '');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [department, setDepartment] = useState('');
+  const [designation, setDesignation] = useState('');
+  const [role, setRole] = useState('');
+  const [status, setStatus] = useState('active');
+  const [reportsTo, setReportsTo] = useState('');
+
+  // Password Reset Panel State
+  const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [resetSuccessMessage, setResetSuccessMessage] = useState('');
+
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     if (employee) {
@@ -31,91 +48,178 @@ export default function EditEmployeeModal({
       setEmployeeId(employee.employeeId || '');
       setEmail(employee.email || '');
       setPhone(employee.phone || '');
-      setDepartment(employee.department || employee.departmentId || departments[0]?.id || 'sales');
-      setRole(employee.role || 'Sales Coordinator');
-      setEmploymentStatus(employee.employmentStatus || 'active');
-      setReportingManagerId(employee.reportingManagerId || '');
+      setDepartment(employee.department || employee.departmentId || 'operations');
+      setDesignation(employee.designation || employee.role || '');
+      setRole(employee.role || employee.designation || '');
+      setStatus(employee.status || employee.employmentStatus || 'active');
+      setReportsTo(employee.reportsTo || employee.reportingManagerId || '');
+      setIsResetPasswordOpen(false);
+      setNewPassword('');
+      setResetSuccessMessage('');
+      setErrorMessage('');
     }
-  }, [employee, departments]);
+  }, [employee]);
 
-  const filteredDesignations = designations.filter(d => d.departmentId === department);
+  // Eligible "Reports To" list
+  const eligibleManagers = useMemo(() => {
+    const curLevel = getRoleLevel(role || designation);
+    if (curLevel === 1) return [];
 
-  const eligibleManagers = existingUsers.filter(u => u.id !== employee.id);
+    return existingUsers
+      .filter(u => {
+        const uId = u.id || u.employeeId;
+        const empId = employee?.id || employee?.employeeId;
+        if (uId === empId) return false;
+        const uLevel = getRoleLevel(u.role || u.designation);
+        return uLevel < curLevel;
+      })
+      .sort((a, b) => getRoleLevel(a.role) - getRoleLevel(b.role));
+  }, [role, designation, existingUsers, employee]);
 
-  const handleSubmit = async (e) => {
+  if (!isOpen || !employee) return null;
+
+  // Handle Save Profile updates
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
-    if (!fullName.trim()) {
-      alert('Please enter employee full name.');
+    setErrorMessage('');
+
+    if (!isAuthorized) {
+      setErrorMessage('Access Denied: Only HR Manager and Leadership can edit employees.');
       return;
     }
 
-    setIsSubmitting(true);
-    try {
-      const mgr = existingUsers.find(u => u.id === reportingManagerId);
-      const updatedPayload = {
-        ...employee,
-        fullName: fullName.trim(),
-        name: fullName.trim(),
-        employeeId: employeeId.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        department,
-        departmentId: department,
-        role,
-        employmentStatus,
-        reportingManagerId: reportingManagerId || null,
-        reportingManagerName: mgr ? (mgr.fullName || mgr.name) : (employee.reportingManagerName || 'Executive Director')
-      };
+    setLoading(true);
 
-      try {
-        await saveEmployeeProfile(updatedPayload, currentUser);
-      } catch (err) {
-        console.warn('Firestore remote sync restricted; updating active application state:', err.message);
+    const updatedData = {
+      fullName: fullName.trim(),
+      name: fullName.trim(),
+      employeeId: employeeId.trim(),
+      phone: phone.trim(),
+      department: department,
+      departmentId: department,
+      designation: designation,
+      role: role.trim() || designation,
+      reportsTo: reportsTo || null,
+      reportingManagerId: reportsTo || null,
+      status: status,
+      employmentStatus: status
+    };
+
+    try {
+      // 1. Update in Firestore
+      await updateDoc(doc(db, 'users', employee.id), updatedData);
+
+      // 2. If status changed, call setEmployeeStatus to also toggle Auth disabled flag
+      if (status !== (employee.status || employee.employmentStatus)) {
+        try {
+          await apiSetEmployeeStatus({ uid: employee.id, status });
+        } catch (authErr) {
+          console.warn('Could not sync Auth disable status:', authErr);
+        }
       }
 
       if (onEmployeeUpdated) {
-        onEmployeeUpdated(updatedPayload);
+        onEmployeeUpdated({ ...employee, ...updatedData });
       }
 
-      setIsSubmitting(false);
       onClose();
     } catch (err) {
-      console.error('Error updating employee:', err);
-      alert('Error updating employee: ' + err.message);
-      setIsSubmitting(false);
+      console.error('Update employee error:', err);
+      setErrorMessage(err.message || 'Failed to update employee profile.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle Password Reset via Cloud Function
+  const handleResetPasswordSubmit = async () => {
+    if (!newPassword || newPassword.length < 8) {
+      setErrorMessage('Password must be at least 8 characters long.');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMessage('');
+
+    try {
+      await apiResetEmployeePassword({
+        uid: employee.id,
+        newPassword: newPassword,
+        requirePasswordChange: true
+      });
+
+      setResetSuccessMessage('Password reset successfully. User must change it on login.');
+      setNewPassword('');
+    } catch (err) {
+      console.error('Password reset error:', err);
+      setErrorMessage(err.message || 'Failed to reset password.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto safe-pb safe-pt">
-      <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col p-4 sm:p-6 shadow-2xl border border-slate-200 my-auto">
-        
+    <div 
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex justify-end transition-opacity"
+      onClick={() => { if (!loading) onClose(); }}
+    >
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        className="w-full md:max-w-xl h-full bg-white shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between border-b pb-3 sm:pb-4 border-slate-100 shrink-0">
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5 truncate mr-2">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-[#05331F] text-emerald-300 flex items-center justify-center font-bold shrink-0">
-              <UserCheck className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold shrink-0 border border-emerald-200">
+              <UserCheck className="w-5 h-5 text-[#05331F]" />
             </div>
-            <div className="truncate">
-              <h3 className="text-sm sm:text-base font-bold text-slate-900 truncate">Edit Employee Profile</h3>
-              <p className="text-[11px] text-slate-500 truncate">Update designation, department, and contact details</p>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 truncate">Edit Employee Profile</h2>
+              <p className="text-xs text-slate-500 font-mono">{employee.email}</p>
             </div>
           </div>
           <button 
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 shrink-0"
+            disabled={loading}
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 shrink-0 cursor-pointer"
+            aria-label="Close"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Edit Form */}
-        <form onSubmit={handleSubmit} className="space-y-3.5 text-xs overflow-y-auto flex-1 pr-1 pt-3">
+        {/* Content */}
+        <form onSubmit={handleSaveProfile} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
           
+          {errorMessage && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {resetSuccessMessage && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-start gap-2">
+              <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <span>{resetSuccessMessage}</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Full Legal Name *</label>
+              <label className="block font-semibold text-slate-700 mb-1">Employee ID *</label>
+              <input
+                type="text"
+                required
+                value={employeeId}
+                onChange={(e) => setEmployeeId(e.target.value)}
+                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-[#05331F]"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Full Name *</label>
               <input
                 type="text"
                 required
@@ -124,35 +228,23 @@ export default function EditEmployeeModal({
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
               />
             </div>
-
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Employee ID Code *</label>
-              <input
-                type="text"
-                required
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-semibold outline-none focus:ring-2 focus:ring-[#05331F]"
-              />
-            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Official Company Email *</label>
+              <label className="block font-semibold text-slate-700 mb-1">Work Email</label>
               <input
                 type="email"
-                required
+                disabled
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
+                className="w-full border border-slate-200 bg-slate-50 text-slate-500 rounded-xl px-3 py-2 text-xs font-mono"
               />
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Contact Phone</label>
+              <label className="block font-semibold text-slate-700 mb-1">Phone</label>
               <input
-                type="text"
+                type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
@@ -160,111 +252,156 @@ export default function EditEmployeeModal({
             </div>
           </div>
 
+          {/* Department */}
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Department *</label>
+            <select
+              required
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
+            >
+              {COMPANY_DEPARTMENTS.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Designation & Role */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Department *</label>
-              <select
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#05331F]"
-              >
-                {departments.map(d => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
+              <label className="block font-semibold text-slate-700 mb-1">Designation *</label>
+              <input
+                type="text"
+                required
+                value={designation}
+                onChange={(e) => setDesignation(e.target.value)}
+                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
+              />
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Designation / Role *</label>
-              <select
+              <label className="block font-semibold text-slate-700 mb-1">Role / Access Level</label>
+              <input
+                type="text"
+                required
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#05331F]"
-              >
-                {filteredDesignations.length > 0 ? (
-                  filteredDesignations.map(des => (
-                    <option key={des.id} value={des.title}>{des.title}</option>
-                  ))
-                ) : (
-                  designations.map(des => (
-                    <option key={des.id} value={des.title}>{des.title}</option>
-                  ))
-                )}
-              </select>
+                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
+              />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Employment Status</label>
-              <select
-                value={employmentStatus}
-                onChange={(e) => setEmploymentStatus(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#05331F]"
-              >
-                <option value="active">Active</option>
-                <option value="on_leave">On Leave</option>
-                <option value="suspended">Suspended</option>
-                <option value="terminated">Terminated</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Reporting Line Manager</label>
-              <select
-                value={reportingManagerId}
-                onChange={(e) => setReportingManagerId(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
-              >
-                <option value="">No Direct Manager (Top Leadership)</option>
-                {eligibleManagers.map(mgr => (
-                  <option key={mgr.id} value={mgr.id}>
-                    {mgr.fullName || mgr.name} ({mgr.role})
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Reports To */}
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">
+              Reports To {getRoleLevel(role) === 1 && <span className="text-slate-400 font-normal">(Executive Director has no manager)</span>}
+            </label>
+            <select
+              disabled={getRoleLevel(role) === 1}
+              value={reportsTo}
+              onChange={(e) => setReportsTo(e.target.value)}
+              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F] disabled:bg-slate-50"
+            >
+              <option value="">-- Choose Reporting Manager --</option>
+              {eligibleManagers.map(mgr => (
+                <option key={mgr.id || mgr.employeeId} value={mgr.id || mgr.employeeId}>
+                  {mgr.fullName || mgr.name} — {mgr.role} (Level {getRoleLevel(mgr.role)})
+                </option>
+              ))}
+            </select>
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100 shrink-0 sticky bottom-0 bg-white">
-            {onEmployeeDeleted && (
+          {/* Status */}
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Account Status</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
+            >
+              <option value="active">Active (Full Portal Access)</option>
+              <option value="inactive">Inactive / Deactivated (Account Disabled)</option>
+            </select>
+          </div>
+
+          {/* Password Reset Section */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-slate-600" />
+                <span className="font-bold text-slate-900 text-xs">Reset Employee Password</span>
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  if (window.confirm(`Are you sure you want to remove ${fullName}?`)) {
-                    onEmployeeDeleted(employee.id);
-                    onClose();
-                  }
-                }}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 text-xs font-bold transition-all"
+                onClick={() => setIsResetPasswordOpen(p => !p)}
+                className="text-xs text-[#05331F] font-bold hover:underline"
               >
-                <Trash2 className="w-4 h-4" />
-                <span>Remove</span>
+                {isResetPasswordOpen ? 'Cancel' : 'Change Password'}
               </button>
+            </div>
+
+            {isResetPasswordOpen && (
+              <div className="space-y-2 pt-2 border-t border-slate-200">
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    placeholder="Enter new 8+ char password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded-xl pl-3 pr-9 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-[#05331F]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(p => !p)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleResetPasswordSubmit}
+                    disabled={loading || !newPassword}
+                    className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-black text-white font-semibold text-xs shadow-xs transition disabled:opacity-50"
+                  >
+                    Confirm Reset
+                  </button>
+                </div>
+              </div>
             )}
-
-            <div className="flex items-center gap-2 ml-auto">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472c] text-white font-bold text-xs shadow-md transition-all active:scale-98 disabled:opacity-50"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>{isSubmitting ? 'Saving...' : 'Save Changes'}</span>
-              </button>
-            </div>
           </div>
-        </form>
 
+          {/* Footer Submit */}
+          <div className="pt-4 border-t border-slate-100 flex justify-end gap-2 sticky bottom-0 bg-white">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex items-center gap-2 px-5 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472c] text-white font-semibold shadow-md transition-all active:scale-98 disabled:opacity-50 cursor-pointer"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-300" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>Save Profile</span>
+              )}
+            </button>
+          </div>
+
+        </form>
       </div>
     </div>
   );
 }
-

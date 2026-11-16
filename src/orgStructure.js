@@ -126,26 +126,59 @@ export function canAssignTask(assigner, assignee, teams = [], teamMembers = []) 
   // 1. Peer-to-peer / Lateral Team Delegation & Collaboration
   // If both employees belong to the same operational team (or if assigner leads the team)
   if (Array.isArray(teams) && Array.isArray(teamMembers)) {
-    const assignerId = assigner.id || assigner.employeeId;
-    const assigneeId = assignee.id || assignee.employeeId;
+    const assignerId = assigner.id || assigner.employeeId || assigner.uid;
+    const assigneeId = assignee.id || assignee.employeeId || assignee.uid;
     
-    // Check if assigner is designated team leader
+    // Check if assigner is designated team leader of a team containing assignee
     const isLeaderOfTeamWithAssignee = teams.some(t => {
-      if (t.teamLeaderId === assignerId || t.teamLeaderId === assigner.employeeId) {
-        return teamMembers.some(m => m.teamId === t.id && (m.userId === assigneeId || m.userId === assignee.id));
+      const leaderMatches = t.leaderId === assignerId || t.teamLeaderId === assignerId || t.leaderId === assigner.employeeId || t.teamLeaderId === assigner.employeeId;
+      if (leaderMatches) {
+        // Check in teamMembers collection array or team.members array
+        const hasMember = teamMembers.some(m => m.teamId === t.id && (m.userId === assigneeId || m.uid === assigneeId || m.id === assigneeId || m.userId === assignee.id)) ||
+          (Array.isArray(t.members) && t.members.some(m => (m.userId === assigneeId || m.uid === assigneeId || m.id === assigneeId || m.userId === assignee.id)));
+        return hasMember;
       }
       return false;
     });
     if (isLeaderOfTeamWithAssignee) return true;
 
-    // Check shared team membership (A assigns B, B assigns C inside the same team unit)
+    // Check individual per-member permission: canAssign, assignScope, assignableTo
+    // Inspect both teamMembers array and team.members array for any team where assigner is a member
+    for (const team of teams) {
+      // Find assigner's membership record in this team
+      const memberEntry = teamMembers.find(m => m.teamId === team.id && (m.userId === assignerId || m.uid === assignerId || m.id === assignerId || m.userId === assigner.id) && m.status !== 'inactive') ||
+        (Array.isArray(team.members) ? team.members.find(m => (m.userId === assignerId || m.uid === assignerId || m.id === assignerId || m.userId === assigner.id)) : null);
+
+      if (memberEntry && memberEntry.canAssign === true) {
+        // Assigner has explicit assign privileges in this team
+        // Check if assignee is also in this team (not the assigner themselves, and not the leader)
+        const isAssigneeInTeam = teamMembers.some(m => m.teamId === team.id && (m.userId === assigneeId || m.uid === assigneeId || m.id === assigneeId || m.userId === assignee.id) && m.status !== 'inactive') ||
+          (Array.isArray(team.members) && team.members.some(m => (m.userId === assigneeId || m.uid === assigneeId || m.id === assigneeId || m.userId === assignee.id)));
+        
+        const isTeamLeader = team.leaderId === assigneeId || team.teamLeaderId === assigneeId;
+
+        if (isAssigneeInTeam && !isTeamLeader) {
+          const scope = memberEntry.assignScope || 'all';
+          if (scope === 'all') {
+            return true;
+          }
+          if (scope === 'selected' && Array.isArray(memberEntry.assignableTo)) {
+            if (memberEntry.assignableTo.includes(assigneeId) || memberEntry.assignableTo.includes(assignee.id) || memberEntry.assignableTo.includes(assignee.employeeId)) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+
+    // Check shared team membership with allowPeerDelegation (Link Tree)
     // Respect HR Team Policy: allowPeerDelegation (defaults to true)
     const assignerTeamIds = teamMembers
-      .filter(m => (m.userId === assignerId || m.userId === assigner.id) && m.status === 'active')
+      .filter(m => (m.userId === assignerId || m.uid === assignerId || m.id === assignerId || m.userId === assigner.id) && m.status === 'active')
       .map(m => m.teamId);
     
     const assigneeTeamIds = teamMembers
-      .filter(m => (m.userId === assigneeId || m.userId === assignee.id) && m.status === 'active')
+      .filter(m => (m.userId === assigneeId || m.uid === assigneeId || m.id === assigneeId || m.userId === assignee.id) && m.status === 'active')
       .map(m => m.teamId);
     
     const commonTeamIds = assignerTeamIds.filter(tId => assigneeTeamIds.includes(tId));

@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
 // Your web app's Firebase configuration (supports .env variables with hardcoded fallbacks)
@@ -17,9 +18,15 @@ export const firebaseConfig = {
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Cloud Firestore and Authentication
+// Initialize Cloud Firestore, Authentication, and Functions
 export const db = getFirestore(app);
 export const auth = getAuth(app);
+export const functions = getFunctions(app);
+
+// Callable Cloud Function triggers
+export const apiCreateEmployee = httpsCallable(functions, 'createEmployee');
+export const apiResetEmployeePassword = httpsCallable(functions, 'resetEmployeePassword');
+export const apiSetEmployeeStatus = httpsCallable(functions, 'setEmployeeStatus');
 
 // Initialize Analytics conditionally (only in browser environments where supported)
 export let analytics = null;

@@ -1,25 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Building2, BarChart3, Inbox, CheckCheck, PlusCircle, 
   Users, Layers, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   Settings, LogOut, ChevronLeft, ChevronRight, X, Shield, 
-  Calendar, RefreshCw, UserCheck, CheckSquare
+  Calendar, RefreshCw, UserCheck, CheckSquare, Briefcase,
+  TrendingUp, Award, FileText, Check, Package
 } from 'lucide-react';
 import { useAuth } from './AuthContext';
-import { hasPermission } from './employeeDirectory';
+import { getScope, canAccess, SCOPES, PAGES } from './permissions';
+import { canAccessSales } from './salesPermissions';
 
 /**
- * Minimal, Clean, and Professional Sidebar for STARK STEEL DOORS (SalesDoor Enterprise)
+ * Systematic Left Navigation Sidebar for STARK STEEL DOORS (SalesDoor Enterprise)
+ * Enforces central permissions and roles cleanly.
  * 
- * Features:
- * - Brand Dark Green: #05331F
- * - Compact STARK STEEL logo and branding header with collapse toggle
- * - Clean, short menu labels: My Tasks, My Team, Daily Tasks, All Tasks, In Progress, Overdue, Blocked, Completed, Approvals, Reports, Settings
- * - Active menu item highlighted with subtle green pill (#0d4a2d / text-emerald-300 / text-white)
- * - Compact employee profile with avatar, name, short designation and direct logout button
- * - Collapsible on desktop (Expanded: w-64 vs. Compact Icon-only: w-18)
- * - Responsive slide-out drawer on mobile
- * - Permission-based visibility
+ * Desktop: In-flow fixed width column (w-72 or w-80, collapsed w-20) with smooth transition.
+ * Mobile: Slide-over drawer with backdrop.
  */
 export default function Sidebar({ 
   currentUser, 
@@ -29,7 +25,8 @@ export default function Sidebar({
   onSubFilterChange, 
   taskCounts = {}, 
   pendingApprovalsCount = 0,
-  onOpenAssignModal,
+  escalationsCount = 0,
+  dueRemindersCount = 0,
   isMobileOpen,
   onCloseMobile,
   isCollapsed = false,
@@ -37,18 +34,24 @@ export default function Sidebar({
 }) {
   const { logout } = useAuth();
   
-  // Real Permission Validation
-  const canAssign = hasPermission(currentUser, 'assign_tasks') || hasPermission(currentUser, 'create_tasks');
-  const canViewReports = hasPermission(currentUser, 'view_reports');
-  const canManageEmployees = hasPermission(currentUser, 'manage_employees');
-  const canReviewApprovals = hasPermission(currentUser, 'approve_tasks') || hasPermission(currentUser, 'review_tasks');
-  const canManageTeams = canAssign || canManageEmployees || [
-    'Executive Director', 'Director Operations', 'General Manager', 'HR Manager', 'Accounts Manager', 
-    'Operations Head', 'CSO', 'Brand Manager', 'Warehouse Supervisor', 
-    'Transport Manager', 'Service Manager', 'Inventory Supervisor', 'SSM', 'ASM'
-  ].includes(currentUser?.role);
+  const scope = getScope(currentUser);
+  const showSalesModule = canAccessSales(currentUser);
 
-  // Short initials helper
+  // Permissions check by central layer
+  const canSeeDashboard = canAccess(currentUser, PAGES.DASHBOARD);
+  const canSeeTeamPerf = canAccess(currentUser, PAGES.TEAM_PERFORMANCE);
+  const canSeeAllTasks = canAccess(currentUser, PAGES.ALL_TASKS);
+  const canSeeMyTasks = canAccess(currentUser, PAGES.MY_TASKS);
+  const canSeeApprovals = canAccess(currentUser, PAGES.APPROVALS);
+  const canSeeEscalations = canAccess(currentUser, PAGES.ESCALATIONS);
+  const canSeeTodos = canAccess(currentUser, PAGES.TODOS);
+  const canSeeTeams = canAccess(currentUser, PAGES.TEAMS);
+  const canSeeEmployees = canAccess(currentUser, PAGES.ORGANIZATION);
+  const canSeeDealers = canAccess(currentUser, PAGES.DEALERS);
+  const canSeeBookings = canAccess(currentUser, PAGES.BOOKINGS);
+  const canSeeReports = canAccess(currentUser, PAGES.REPORTS);
+  const canSeeSettings = canAccess(currentUser, PAGES.SETTINGS);
+
   const getInitials = (name) => {
     if (!name) return 'EM';
     const parts = name.trim().split(' ');
@@ -56,7 +59,6 @@ export default function Sidebar({
     return name.slice(0, 2).toUpperCase();
   };
 
-  // Nav item click helper
   const handleNavClick = (tab, subFilter = null) => {
     onTabChange(tab);
     if (subFilter && onSubFilterChange) {
@@ -67,382 +69,356 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Mobile Backdrop */}
+      {/* Mobile Drawer Backdrop */}
       {isMobileOpen && (
         <div 
           onClick={onCloseMobile}
-          className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-xs lg:hidden transition-opacity"
+          className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs lg:hidden"
         />
       )}
 
-      {/* Main Sidebar - Desktop fixed, Mobile slide-out drawer */}
+      {/* Main Sidebar Aside */}
       <aside className={`
-        fixed top-0 bottom-0 left-0 z-50 bg-[#05331F] text-white flex flex-col transition-all duration-300 ease-in-out border-r border-emerald-950/70 shadow-2xl select-none
-        w-72 max-w-[85vw] lg:max-w-none
+        fixed lg:sticky top-0 left-0 z-50 h-screen bg-[#05331F] text-white flex flex-col justify-between shrink-0
+        transition-all duration-300 ease-in-out border-r border-[#07472B]/60 shadow-xl
+        ${isCollapsed ? 'w-20' : 'w-64 lg:w-72'}
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        ${isCollapsed ? 'lg:w-[72px]' : 'lg:w-64'}
       `}>
         
-        {/* 1. COMPACT BRAND HEADER */}
-        <div className="h-16 px-4 border-b border-emerald-900/60 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center font-bold shrink-0 border border-emerald-400/30 shadow-inner">
-              <Building2 className="w-5 h-5 text-emerald-300" />
-            </div>
-            {(!isCollapsed || isMobileOpen) && (
-              <div className="truncate">
-                <div className="font-bold text-xs tracking-wider text-white truncate flex items-center gap-1.5">
-                  <span>STARK STEEL</span>
-                  <span className="text-[8px] bg-emerald-400/20 text-emerald-300 px-1.5 py-0.5 rounded font-mono font-bold">ERP</span>
-                </div>
-                <div className="text-[10px] text-emerald-300/70 truncate font-mono">Enterprise Task Hub</div>
+        {/* Top Header & Logo */}
+        <div className="shrink-0">
+          <div className="h-16 flex items-center justify-between px-4 border-b border-[#07472B]/70">
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#10B981] to-[#07472B] flex items-center justify-center font-black text-white shrink-0 shadow-xs text-sm">
+                SS
               </div>
-            )}
-          </div>
+              {!isCollapsed && (
+                <div className="truncate">
+                  <div className="text-xs font-bold text-white tracking-wider uppercase">STARK STEEL</div>
+                  <div className="text-[10px] text-emerald-300/80 tracking-tight font-medium">SalesDoor Enterprise</div>
+                </div>
+              )}
+            </div>
 
-          <div className="flex items-center gap-1">
-            {/* Mobile Close Button */}
-            <button
-              onClick={onCloseMobile}
-              title="Close navigation"
-              className="lg:hidden p-2 text-emerald-300/80 hover:text-white rounded-lg hover:bg-emerald-900/40 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            {/* Desktop Collapse Toggle */}
+            {/* Collapse toggle button on desktop */}
             <button
               onClick={onToggleCollapse}
-              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="hidden lg:flex p-1.5 text-emerald-300/80 hover:text-white rounded-lg hover:bg-emerald-900/40 transition-colors ml-auto"
+              className="hidden lg:flex p-1.5 rounded-lg text-emerald-200/60 hover:text-white hover:bg-[#07472B] transition"
+              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+
+            {/* Close button on mobile */}
+            <button
+              onClick={onCloseMobile}
+              className="lg:hidden p-1.5 rounded-lg text-emerald-200/60 hover:text-white hover:bg-[#07472B]"
+            >
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Quick Assign Action (if permitted) */}
-        {canAssign && (
-          <div className="p-3 border-b border-emerald-900/40">
-            <button
-              onClick={() => {
-                onOpenAssignModal();
-                if (onCloseMobile) onCloseMobile();
-              }}
-              title="Assign New Task"
-              className={`w-full flex items-center justify-center gap-2 bg-emerald-400 text-[#05331F] hover:bg-emerald-300 font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all active:scale-98 ${
-                isCollapsed ? 'px-0' : 'px-3'
-              }`}
-            >
-              <PlusCircle className="w-4 h-4 shrink-0" />
-              {!isCollapsed && <span className="truncate">Assign Task</span>}
-            </button>
-          </div>
-        )}
-
-        {/* 2. MAIN NAVIGATION ITEMS (Grouped per Section 12 Specification) */}
-        <nav className="flex-1 overflow-y-auto px-2.5 py-3 space-y-4 text-xs no-scrollbar">
+        {/* Scrollable Navigation Menu */}
+        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin scrollbar-thumb-emerald-900">
           
-          {/* GROUP 1: WORKSPACE */}
-          <div className="space-y-1">
-            {!isCollapsed && (
-              <div className="px-3 pt-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300/60 font-mono">
-                Workspace
-              </div>
-            )}
-
-            {/* Dashboard */}
-            <button
-              onClick={() => handleNavClick('dashboard')}
-              title="Dashboard"
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                activeTab === 'dashboard'
-                  ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                  : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">Dashboard</span>}
-            </button>
-
-            {/* My Tasks */}
-            <button
-              onClick={() => handleNavClick('my_tasks', 'all')}
-              title="My Tasks"
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                activeTab === 'my_tasks' && employeeSubFilter === 'all'
-                  ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                  : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-              }`}
-            >
-              <Inbox className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">My Tasks</span>}
-              {!isCollapsed && taskCounts.total > 0 && (
-                <span className="ml-auto text-[10px] bg-emerald-950/80 text-emerald-300 px-1.5 py-0.5 rounded font-mono font-bold">
-                  {taskCounts.total}
-                </span>
+          {/* GROUP 1: OVERVIEW */}
+          {(canSeeDashboard || canSeeTeamPerf) && (
+            <div>
+              {!isCollapsed && (
+                <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
+                  Overview
+                </p>
               )}
-            </button>
+              <div className="space-y-1">
+                {canSeeDashboard && (
+                  <button
+                    onClick={() => handleNavClick('dashboard')}
+                    title={isCollapsed ? 'Dashboard' : ''}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                      activeTab === 'dashboard'
+                        ? 'bg-[#0d4a2d] text-white shadow-xs'
+                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                    }`}
+                  >
+                    <Layers className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>Dashboard</span>}
+                  </button>
+                )}
 
-            {/* My Team */}
-            {canManageTeams && (
-              <button
-                onClick={() => handleNavClick('teams')}
-                title="My Team"
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                  activeTab === 'teams'
-                    ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                    : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-                }`}
-              >
-                <Users className="w-4 h-4 shrink-0 text-emerald-300" />
-                {!isCollapsed && <span className="truncate">My Team</span>}
-              </button>
-            )}
+                {canSeeTeamPerf && (
+                  <button
+                    onClick={() => handleNavClick('team_performance')}
+                    title={isCollapsed ? 'Team Performance' : ''}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                      activeTab === 'team_performance'
+                        ? 'bg-[#0d4a2d] text-white shadow-xs'
+                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                    }`}
+                  >
+                    <TrendingUp className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>Team Performance</span>}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
-            {/* Daily Tasks */}
-            <button
-              onClick={() => handleNavClick('my_tasks', 'today')}
-              title="Daily Tasks"
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                activeTab === 'my_tasks' && employeeSubFilter === 'today'
-                  ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                  : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-              }`}
-            >
-              <Clock className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">Daily Tasks</span>}
-              {!isCollapsed && taskCounts.today > 0 && (
-                <span className="ml-auto text-[10px] bg-emerald-950/80 text-emerald-300 px-1.5 py-0.5 rounded font-mono">
-                  {taskCounts.today}
-                </span>
+          {/* GROUP 2: SALES (Visible to Sales & Universal roles) */}
+          {showSalesModule && (canSeeBookings || canSeeDealers) && (
+            <div>
+              {!isCollapsed && (
+                <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
+                  Sales
+                </p>
               )}
-            </button>
-
-            {/* To-Do & Reminders */}
-            <button
-              onClick={() => handleNavClick('todos')}
-              title="To-Do & Reminders"
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                activeTab === 'todos'
-                  ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                  : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-              }`}
-            >
-              <CheckSquare className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">To-Do & Reminders</span>}
-            </button>
-          </div>
-
-          {/* GROUP 2: TASK MANAGEMENT */}
-          <div className="space-y-1">
-            {!isCollapsed && (
-              <div className="px-3 pt-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300/60 font-mono">
-                Task Management
-              </div>
-            )}
-
-            {/* All Tasks */}
-            <button
-              onClick={() => handleNavClick('my_tasks', 'all')}
-              title="All Tasks"
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white`}
-            >
-              <Layers className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">All Tasks</span>}
-            </button>
-
-            {/* Create Task */}
-            {canAssign && (
-              <button
-                onClick={() => {
-                  onOpenAssignModal();
-                  if (onCloseMobile) onCloseMobile();
-                }}
-                title="Create Task"
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white"
-              >
-                <PlusCircle className="w-4 h-4 shrink-0 text-emerald-300" />
-                {!isCollapsed && <span className="truncate">Create Task</span>}
-              </button>
-            )}
-
-            {/* SOP Templates */}
-            {canManageTeams && (
-              <button
-                onClick={() => handleNavClick('templates')}
-                title="SOP Templates"
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                  activeTab === 'templates'
-                    ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                    : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-                }`}
-              >
-                <Calendar className="w-4 h-4 shrink-0 text-emerald-300" />
-                {!isCollapsed && <span className="truncate">SOP Templates</span>}
-              </button>
-            )}
-
-            {/* Dealers Directory (Dedicated Sales Roster) */}
-            <button
-              onClick={() => handleNavClick('dealers')}
-              title="Dealers Directory"
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                activeTab === 'dealers'
-                  ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                  : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-              }`}
-            >
-              <Building2 className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">Dealers Directory</span>}
-            </button>
-
-            {/* Approvals */}
-            {canReviewApprovals && (
-              <button
-                onClick={() => handleNavClick('approvals')}
-                title="Approvals"
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                  activeTab === 'approvals'
-                    ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                    : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-                }`}
-              >
-                <CheckCheck className="w-4 h-4 shrink-0 text-amber-300" />
-                {!isCollapsed && <span className="truncate">Approvals</span>}
-                {!isCollapsed && pendingApprovalsCount > 0 && (
-                  <span className="ml-auto text-[10px] bg-amber-400 text-slate-900 px-1.5 py-0.2 rounded-full font-bold">
-                    {pendingApprovalsCount}
-                  </span>
+              <div className="space-y-1">
+                {canSeeBookings && (
+                  <button
+                    onClick={() => handleNavClick('bookings')}
+                    title={isCollapsed ? 'Dealer Bookings' : ''}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                      activeTab === 'bookings'
+                        ? 'bg-[#0d4a2d] text-white shadow-xs'
+                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                    }`}
+                  >
+                    <Package className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>Dealer Bookings</span>}
+                  </button>
                 )}
-              </button>
-            )}
 
-            {/* Escalations */}
-            <button
-              onClick={() => handleNavClick('escalations')}
-              title="Escalations"
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                activeTab === 'escalations'
-                  ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                  : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-              }`}
-            >
-              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-300" />
-              {!isCollapsed && <span className="truncate">Escalations</span>}
-            </button>
-          </div>
-
-          {/* GROUP 3: OPERATIONS */}
-          <div className="space-y-1">
-            {!isCollapsed && (
-              <div className="px-3 pt-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300/60 font-mono">
-                Operations
-              </div>
-            )}
-
-            {/* Daily Operations */}
-            <button
-              onClick={() => handleNavClick('dashboard')}
-              title="Daily Operations"
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white"
-            >
-              <RefreshCw className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">Daily Operations</span>}
-            </button>
-
-            {/* Departments */}
-            <button
-              onClick={() => handleNavClick('organization')}
-              title="Departments"
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white"
-            >
-              <Building2 className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">Departments</span>}
-            </button>
-
-            {/* Reports */}
-            {canViewReports && (
-              <button
-                onClick={() => handleNavClick('dashboard')}
-                title="Reports"
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white"
-              >
-                <BarChart3 className="w-4 h-4 shrink-0 text-emerald-300" />
-                {!isCollapsed && <span className="truncate">Reports</span>}
-              </button>
-            )}
-          </div>
-
-          {/* GROUP 4: ADMINISTRATION */}
-          <div className="space-y-1">
-            {!isCollapsed && (
-              <div className="px-3 pt-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300/60 font-mono">
-                Administration
-              </div>
-            )}
-
-            {/* Employees */}
-            <button
-              onClick={() => handleNavClick('organization')}
-              title="Employees"
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all ${
-                activeTab === 'organization'
-                  ? 'bg-emerald-900/90 text-white font-bold shadow-2xs border border-emerald-500/30'
-                  : 'text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white'
-              }`}
-            >
-              <UserCheck className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">Employees</span>}
-            </button>
-
-            {/* Settings */}
-            <button
-              onClick={() => handleNavClick('organization')}
-              title="Settings"
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium transition-all text-emerald-100/80 hover:bg-emerald-900/40 hover:text-white"
-            >
-              <Settings className="w-4 h-4 shrink-0 text-emerald-300" />
-              {!isCollapsed && <span className="truncate">Settings</span>}
-            </button>
-          </div>
-
-        </nav>
-
-        {/* 3. MINIMAL EMPLOYEE PROFILE AT BOTTOM */}
-        <div className="p-3 border-t border-emerald-900/60 bg-emerald-950/40 shrink-0 safe-pb">
-          <div className="flex items-center justify-between gap-2.5">
-            
-            {/* Small Avatar + Name + Designation */}
-            <div className="flex items-center gap-2.5 overflow-hidden min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-emerald-400 text-[#05331F] font-bold flex items-center justify-center text-xs shrink-0 shadow-2xs">
-                {currentUser?.photoUrl ? (
-                  <img src={currentUser.photoUrl} alt="" className="w-8 h-8 rounded-xl object-cover" />
-                ) : (
-                  getInitials(currentUser?.fullName || currentUser?.name)
+                {canSeeDealers && (
+                  <button
+                    onClick={() => handleNavClick('dealers')}
+                    title={isCollapsed ? 'Dealers' : ''}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                      activeTab === 'dealers'
+                        ? 'bg-[#0d4a2d] text-white shadow-xs'
+                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                    }`}
+                  >
+                    <Briefcase className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>Dealers</span>}
+                  </button>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* GROUP 3: WORK */}
+          <div>
+            {!isCollapsed && (
+              <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
+                Work
+              </p>
+            )}
+            <div className="space-y-1">
+              
+              {/* All Tasks (Company & Department scope only) */}
+              {canSeeAllTasks && (
+                <button
+                  onClick={() => handleNavClick('my_tasks', 'all')}
+                  title={isCollapsed ? 'All Tasks' : ''}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activeTab === 'my_tasks' && employeeSubFilter === 'all'
+                      ? 'bg-[#0d4a2d] text-white shadow-xs'
+                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Inbox className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>All Tasks</span>}
+                  </div>
+                  {!isCollapsed && taskCounts.total > 0 && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#07472B] text-emerald-200">
+                      {taskCounts.total}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              {/* Approvals */}
+              {canSeeApprovals && (
+                <button
+                  onClick={() => handleNavClick('approvals')}
+                  title={isCollapsed ? 'Approvals' : ''}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activeTab === 'approvals'
+                      ? 'bg-[#0d4a2d] text-white shadow-xs'
+                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <CheckSquare className="w-4 h-4 shrink-0 text-amber-400" />
+                    {!isCollapsed && <span>Approvals</span>}
+                  </div>
+                  {!isCollapsed && pendingApprovalsCount > 0 && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                      {pendingApprovalsCount}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              {/* Escalations (Excluded from Downline & Self scopes) */}
+              {canSeeEscalations && (
+                <button
+                  onClick={() => handleNavClick('escalations')}
+                  title={isCollapsed ? 'Escalations' : ''}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activeTab === 'escalations'
+                      ? 'bg-[#0d4a2d] text-white shadow-xs'
+                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400" />
+                    {!isCollapsed && <span>Escalations</span>}
+                  </div>
+                  {!isCollapsed && escalationsCount > 0 && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/30">
+                      {escalationsCount}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              {/* My Tasks (Daily Task Sheet) */}
+              {canSeeMyTasks && (
+                <button
+                  onClick={() => handleNavClick('my_tasks', 'my_assigned')}
+                  title={isCollapsed ? 'My Tasks' : ''}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activeTab === 'my_tasks' && employeeSubFilter === 'my_assigned'
+                      ? 'bg-[#0d4a2d] text-white shadow-xs'
+                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  {!isCollapsed && <span>My Tasks</span>}
+                </button>
+              )}
+
+              {/* To-Do & Reminders */}
+              {canSeeTodos && (
+                <button
+                  onClick={() => handleNavClick('todos')}
+                  title={isCollapsed ? 'To-Do & Reminders' : ''}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activeTab === 'todos'
+                      ? 'bg-[#0d4a2d] text-white shadow-xs'
+                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Clock className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>To-Do & Reminders</span>}
+                  </div>
+                  {!isCollapsed && dueRemindersCount > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
+                  )}
+                </button>
+              )}
+
+              {/* My Team */}
+              {canSeeTeams && (
+                <button
+                  onClick={() => handleNavClick('teams')}
+                  title={isCollapsed ? 'My Team' : ''}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activeTab === 'teams'
+                      ? 'bg-[#0d4a2d] text-white shadow-xs'
+                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-4 h-4 shrink-0 text-emerald-400" />
+                  {!isCollapsed && <span>My Team</span>}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* GROUP 4: PEOPLE (Employees Directory - Company scope only) */}
+          {canSeeEmployees && (
+            <div>
+              {!isCollapsed && (
+                <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
+                  People
+                </p>
+              )}
+              <div className="space-y-1">
+                <button
+                  onClick={() => handleNavClick('organization')}
+                  title={isCollapsed ? 'Employees' : ''}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activeTab === 'organization'
+                      ? 'bg-[#0d4a2d] text-white shadow-xs'
+                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                  }`}
+                >
+                  <Building2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  {!isCollapsed && <span>Employees</span>}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* GROUP 5: REPORTS & SETTINGS (Company & Dept scopes only) */}
+          {(canSeeReports || canSeeSettings) && (
+            <div>
+              {!isCollapsed && (
+                <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
+                  Reports & Settings
+                </p>
+              )}
+              <div className="space-y-1">
+                {canSeeReports && (
+                  <button
+                    onClick={() => handleNavClick('reports')}
+                    title={isCollapsed ? 'Reports' : ''}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                      activeTab === 'reports'
+                        ? 'bg-[#0d4a2d] text-white shadow-xs'
+                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                    }`}
+                  >
+                    <FileText className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>Reports</span>}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {/* Footer: User Profile & Direct Logout */}
+        <div className="p-3 border-t border-[#07472B]/70 shrink-0 bg-[#042818]/60">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 overflow-hidden">
+              <div className="w-8 h-8 rounded-full bg-[#10B981]/20 text-[#10B981] font-bold text-xs flex items-center justify-center shrink-0 border border-[#10B981]/30">
+                {getInitials(currentUser?.fullName || currentUser?.name)}
               </div>
               {!isCollapsed && (
-                <div className="overflow-hidden min-w-0 leading-tight">
-                  <div className="font-bold text-xs text-white truncate">
+                <div className="truncate">
+                  <p className="text-xs font-semibold text-white truncate">
                     {currentUser?.fullName || currentUser?.name || 'Staff User'}
-                  </div>
-                  <div className="text-[10px] text-emerald-300/80 truncate font-medium">
-                    {currentUser?.role || 'Employee'}
-                  </div>
+                  </p>
+                  <p className="text-[10px] text-emerald-300/70 truncate">
+                    {currentUser?.role || 'Staff'}
+                  </p>
                 </div>
               )}
             </div>
 
-            {/* Compact Logout Icon Button */}
             <button
-              onClick={() => logout()}
+              onClick={logout}
               title="Sign Out"
-              className="p-1.5 text-emerald-300 hover:text-rose-200 hover:bg-rose-950/50 rounded-xl transition-colors shrink-0"
+              className="p-1.5 rounded-lg text-emerald-300/60 hover:text-white hover:bg-rose-900/40 transition"
             >
               <LogOut className="w-4 h-4" />
             </button>
-
           </div>
         </div>
 

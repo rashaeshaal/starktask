@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Building2, Phone, Calendar, Clock, Lock, Unlock, CheckCircle2, 
   AlertCircle, AlertTriangle, Layers, Filter, PlusCircle, User, Users,
   ShieldAlert, RefreshCw, Eye, Edit3, CheckCheck, ChevronRight,
   TrendingUp, BarChart3, Inbox, Briefcase, FileText, Bell, Database,
-  Menu, X, LogOut
+  Menu, X, LogOut, CheckSquare, Search, Command, Bookmark, Megaphone,
+  Package
 } from 'lucide-react';
 
 import { useAuth } from './AuthContext';
@@ -23,8 +24,17 @@ import {
   subscribeToTasks, 
   createFirestoreTask, 
   updateFirestoreTask, 
-  subscribeToNotifications 
+  subscribeToNotifications,
+  subscribeToDealers,
+  subscribeToDealerBookings
 } from './firestoreService';
+import { getScope, canAccess, SCOPES, PAGES } from './permissions';
+import { canAccessSales } from './salesPermissions';
+import { db } from './firebase';
+import { 
+  collection, query, where, onSnapshot, addDoc, updateDoc, 
+  doc, serverTimestamp, Timestamp 
+} from 'firebase/firestore';
 
 import Sidebar from './Sidebar';
 import TaskAssignmentModal from './TaskAssignmentModal';
@@ -38,14 +48,21 @@ import AddEmployeeModal from './AddEmployeeModal';
 import SopTemplatesView from './SopTemplatesView';
 import EscalationsView from './EscalationsView';
 import TodoReminders from './TodoReminders';
+import TeamPerformanceView from './TeamPerformanceView';
+import ReportsView from './ReportsView';
 import DealersDirectoryView from './DealersDirectoryView';
+import DealerBookingsView from './DealerBookingsView';
 import PwaInstallPrompt from './PwaInstallPrompt';
+import DevRoleSwitcher, { TEST_PERSONAS } from './DevRoleSwitcher';
 
 export default function App() {
   const { currentUser, userProfile, loading: authLoading, logout } = useAuth();
   const todayStr = getTodayDateString();
 
-  // Master Data from Live Firestore (with verified company master defaults)
+  // Dev override persona for testing RBAC live in the UI
+  const [devOverrideUser, setDevOverrideUser] = useState(null);
+
+  // Master Data from Live Firestore
   const [departments, setDepartments] = useState(MASTER_DEPARTMENTS);
   const [designations, setDesignations] = useState(MASTER_DESIGNATIONS);
   const [employees, setEmployees] = useState(ENTERPRISE_EMPLOYEE_DIRECTORY);
@@ -68,59 +85,85 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [notifications, setNotifications] = useState([]);
 
-  // Active Main Navigation Tab: 'dashboard' | 'my_tasks' | 'teams' | 'approvals' | 'organization'
+  // Live Dealers & Bookings
+  const [dealers, setDealers] = useState([]);
+  const [dealerBookings, setDealerBookings] = useState([]);
+
+  // Logged-in user's private to-dos
+  const [userTodos, setUserTodos] = useState([]);
+
+  // Active view tab
   const [activeTab, setActiveTab] = useState('dashboard');
   const [employeeSubFilter, setEmployeeSubFilter] = useState('all');
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-  // Modals
+  // Modal Dialogs
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
-  const [assignModalPreset, setAssignModalPreset] = useState(null); // { teamId, memberId }
+  const [assignModalPreset, setAssignModalPreset] = useState(null);
   const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
   const [selectedTaskForExec, setSelectedTaskForExec] = useState(null);
   const [selectedTaskForApproval, setSelectedTaskForApproval] = useState(null);
-  const [selectedTaskForLogs, setSelectedTaskForLogs] = useState(null);
 
-  // 1. One-time initialization of Approved Structure in Cloud Firestore
+  // Responsive Navigation State
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isAlertsOpen, setIsAlertsOpen] = useState(false);
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
+
+  // Quick Search (Ctrl+K)
+  const [isQuickSearchOpen, setIsQuickSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Announcements Banner state
+  const [announcements, setAnnouncements] = useState([]);
+
+  // Active user: dev override or authenticated user profile
+  const activeEmployee = devOverrideUser || userProfile || {
+    id: currentUser?.uid,
+    uid: currentUser?.uid,
+    fullName: currentUser?.displayName || currentUser?.email,
+    role: 'Employee',
+    department: 'operations'
+  };
+
+  const userScope = getScope(activeEmployee);
+  const isSales = canAccessSales(activeEmployee);
+  const currentUid = currentUser?.uid || activeEmployee?.uid || activeEmployee?.id;
+
+  // Route Guard Helper with Toast Notification
+  const navigateToTabSafe = (targetTab, subFilter = null) => {
+    if (!canAccess(activeEmployee, targetTab)) {
+      setToastMessage("You don't have access to that page.");
+      setTimeout(() => setToastMessage(null), 3500);
+      setActiveTab('dashboard');
+      return;
+    }
+    setActiveTab(targetTab);
+    if (subFilter) setEmployeeSubFilter(subFilter);
+  };
+
+  // Route Guard check whenever activeTab or activeEmployee changes
   useEffect(() => {
-    initializeCompanyStructure();
-  }, []);
+    if (activeTab !== 'dashboard' && !canAccess(activeEmployee, activeTab)) {
+      setToastMessage("You don't have access to that page.");
+      setTimeout(() => setToastMessage(null), 3500);
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, activeEmployee]);
 
-  // 2. Real-time Subscriptions to Firestore Collections
+  // 1. Master Data Listeners
   useEffect(() => {
-    const unsubDepts = subscribeToDepartments((deptsList) => {
-      if (deptsList && deptsList.length > 0) setDepartments(deptsList);
-    });
-    const unsubDes = subscribeToDesignations((desList) => {
-      if (desList && desList.length > 0) setDesignations(desList);
-    });
-    const unsubEmps = subscribeToEmployees((firestoreList) => {
-      // Merge verified master directory with Firestore overrides
-      const masterList = [...ENTERPRISE_EMPLOYEE_DIRECTORY];
-      const firestoreMap = new Map();
-      if (Array.isArray(firestoreList)) {
-        firestoreList.forEach(e => firestoreMap.set(e.employeeId || e.id, e));
+    const unsubDepts = subscribeToDepartments(setDepartments);
+    const unsubDes = subscribeToDesignations(setDesignations);
+    const unsubEmps = subscribeToEmployees((liveEmps) => {
+      if (liveEmps && liveEmps.length > 0) {
+        setEmployees(liveEmps);
       }
-
-      const merged = masterList.map(emp => ({
-        ...emp,
-        ...(firestoreMap.get(emp.employeeId) || {})
-      }));
-
-      // Append any newly registered employees
-      if (Array.isArray(firestoreList)) {
-        firestoreList.forEach(e => {
-          if (!masterList.some(m => m.employeeId === e.employeeId || m.email === e.email)) {
-            merged.push(e);
-          }
-        });
-      }
-
-      setEmployees(merged);
     });
     const unsubTeams = subscribeToTeams(setTeams);
     const unsubMembers = subscribeToTeamMembers(setTeamMembers);
+    const unsubDealers = subscribeToDealers(setDealers);
+    const unsubBookings = subscribeToDealerBookings(setDealerBookings);
 
     return () => {
       unsubDepts && unsubDepts();
@@ -128,78 +171,142 @@ export default function App() {
       unsubEmps && unsubEmps();
       unsubTeams && unsubTeams();
       unsubMembers && unsubMembers();
+      unsubDealers && unsubDealers();
+      unsubBookings && unsubBookings();
     };
   }, []);
 
-  // 3. Real-time Tasks & Notifications Stream for Logged-In User
+  // 2. Real-time Tasks & Notifications Stream filtered strictly by RBAC scope
   useEffect(() => {
-    if (!userProfile) return;
+    if (!activeEmployee) return;
 
-    const unsubTasks = subscribeToTasks(userProfile, setTasks);
-    const unsubNotifs = subscribeToNotifications(userProfile.id, setNotifications);
+    const unsubTasks = subscribeToTasks(activeEmployee, setTasks, employees);
+    const unsubNotifs = subscribeToNotifications(activeEmployee.id || activeEmployee.uid, setNotifications);
 
     return () => {
       unsubTasks && unsubTasks();
       unsubNotifs && unsubNotifs();
     };
-  }, [userProfile]);
+  }, [activeEmployee, employees]);
 
-  // If loading auth state
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-        <div className="text-center space-y-3">
-          <div className="w-10 h-10 border-4 border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto" />
-         
-        </div>
-      </div>
-    );
-  }
+  // 3. Private User To-Dos Listener
+  useEffect(() => {
+    if (!currentUid) return;
 
-  // If unauthenticated, present real Firebase Authentication Login
-  if (!currentUser) {
-    return <LoginScreen />;
-  }
+    const q = query(collection(db, 'todos'), where('uid', '==', currentUid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          ...data,
+          dueAtDate: data.dueAt?.toDate ? data.dueAt.toDate() : (data.dueAt ? new Date(data.dueAt) : null),
+          remindAtDate: data.remindAt?.toDate ? data.remindAt.toDate() : (data.remindAt ? new Date(data.remindAt) : null)
+        });
+      });
+      setUserTodos(list);
+    }, (err) => {
+      console.warn('To-dos listener error:', err);
+    });
 
-  const activeEmployee = userProfile || {
-    id: currentUser.uid,
-    fullName: currentUser.displayName || currentUser.email,
-    role: 'Employee',
-    department: 'operations'
-  };
+    return () => unsubscribe();
+  }, [currentUid]);
 
-  const isLeadership = ['Executive Director', 'Director Operations', 'General Manager'].includes(activeEmployee.role);
+  // 4. Announcements Stream
+  useEffect(() => {
+    const q = query(collection(db, 'announcements'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+      setAnnouncements(list);
+    }, (err) => {
+      console.warn('Announcements listener error:', err);
+    });
 
-  // Review Queue: Tasks waiting for current user's approval
+    return () => unsubscribe();
+  }, []);
+
+  // 5. Global Keyboard Shortcut: Ctrl+K / Cmd+K
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsQuickSearchOpen(prev => !prev);
+      }
+      if (e.key === 'Escape') {
+        setIsQuickSearchOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Review Queue (Sign-offs waiting for current supervisor)
   const pendingApprovals = tasks.filter(t => 
-    t.status === TASK_STATUSES.PENDING_REVIEW && canApproveTask(activeEmployee, t)
+    (t.status === TASK_STATUSES.PENDING_REVIEW || t.status === 'Pending Review' || t.status === 'Pending Sign-Off') && 
+    (canApproveTask(activeEmployee, t) || userScope === SCOPES.COMPANY)
   );
 
-  // Task Counts for Sidebar Badges
+  // Active escalations count
+  const escalationsCount = tasks.filter(t => 
+    t.status === 'Blocked' || 
+    t.status === 'Operational Blocker' || 
+    t.paymentStatus === 'Payment Hold' ||
+    (t.deadlineDate && t.deadlineDate < todayStr && t.status !== TASK_STATUSES.COMPLETED)
+  ).length;
+
+  // Task Counts for Badges
   const taskCounts = {
     total: tasks.length,
-    today: tasks.filter(t => t.taskDate === todayStr || t.deadlineDate === todayStr).length,
+    today: tasks.filter(t => (t.taskDate || t.deadlineDate || '').startsWith(todayStr)).length,
     inProgress: tasks.filter(t => t.status === TASK_STATUSES.IN_PROGRESS).length,
-    overdue: tasks.filter(t => t.deadlineDate < todayStr && t.status !== TASK_STATUSES.COMPLETED).length,
-    blocked: tasks.filter(t => t.status === TASK_STATUSES.BLOCKED).length,
-    completed: tasks.filter(t => t.status === TASK_STATUSES.COMPLETED).length
+    overdue: tasks.filter(t => t.deadlineDate && t.deadlineDate < todayStr && t.status !== TASK_STATUSES.COMPLETED).length,
+    blocked: tasks.filter(t => t.status === TASK_STATUSES.BLOCKED || t.status === 'Blocked').length,
+    completed: tasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length
   };
 
-  // Filtered Task List
-  const employeeFilteredTasks = tasks.filter(t => {
-    if (activeTab === 'my_tasks' && !isLeadership) {
-      const isAssigned = t.assignedToId === activeEmployee.id || (t.assigneeIds && t.assigneeIds.includes(activeEmployee.id));
-      if (!isAssigned) return false;
-    }
+  // Due reminders count
+  const dueRemindersCount = useMemo(() => {
+    const now = new Date().getTime();
+    return userTodos.filter(t => !t.done && t.remindAtDate && t.remindAtDate.getTime() <= now).length;
+  }, [userTodos]);
 
-    if (employeeSubFilter === 'today') return t.taskDate === todayStr || t.deadlineDate === todayStr;
-    if (employeeSubFilter === 'in_progress') return t.status === TASK_STATUSES.IN_PROGRESS;
-    if (employeeSubFilter === 'pending') return t.status === TASK_STATUSES.ASSIGNED || t.status === TASK_STATUSES.ACCEPTED;
-    if (employeeSubFilter === 'overdue') return t.deadlineDate < todayStr && t.status !== TASK_STATUSES.COMPLETED;
-    if (employeeSubFilter === 'completed') return t.status === TASK_STATUSES.COMPLETED;
-    if (employeeSubFilter === 'blocked') return t.status === TASK_STATUSES.BLOCKED;
-    return true;
-  });
+  // Operational Alerts Engine
+  const systemAlerts = useMemo(() => {
+    const alerts = [];
+    if (taskCounts.overdue > 0) {
+      alerts.push({
+        id: 'alt_overdue',
+        type: 'critical',
+        title: `${taskCounts.overdue} Tasks Overdue`,
+        desc: 'Overdue execution deadlines require immediate supervisor clearance.',
+        actionTab: 'my_tasks'
+      });
+    }
+    if (pendingApprovals.length > 0 && canAccess(activeEmployee, PAGES.APPROVALS)) {
+      alerts.push({
+        id: 'alt_approvals',
+        type: 'warning',
+        title: `${pendingApprovals.length} Sign-Offs Pending Review`,
+        desc: 'Task executions waiting for supervisor decision.',
+        actionTab: 'approvals'
+      });
+    }
+    return alerts;
+  }, [taskCounts, pendingApprovals, activeEmployee]);
+
+  // Quick Search Results
+  const quickSearchResults = useMemo(() => {
+    if (!searchQuery.trim()) return { dealers: [], tasks: [], employees: [] };
+    const q = searchQuery.toLowerCase();
+
+    return {
+      dealers: dealers.filter(d => (d.name || d.firmName || '').toLowerCase().includes(q)).slice(0, 4),
+      tasks: tasks.filter(t => (t.title || '').toLowerCase().includes(q)).slice(0, 4),
+      employees: employees.filter(e => (e.fullName || e.name || '').toLowerCase().includes(q)).slice(0, 4)
+    };
+  }, [searchQuery, dealers, tasks, employees]);
 
   // Handlers
   const handleTaskCreated = async (newTaskData) => {
@@ -220,18 +327,112 @@ export default function App() {
     }
   };
 
+  // Quick Add To-Do from Dashboard
+  const handleDashboardQuickAddTodo = async (title) => {
+    if (!title || !currentUid) return;
+    try {
+      const todayDateObj = new Date();
+      todayDateObj.setHours(18, 0, 0, 0);
+
+      await addDoc(collection(db, 'todos'), {
+        title,
+        notes: '',
+        dueAt: Timestamp.fromDate(todayDateObj),
+        remindAt: null,
+        priority: 'Medium',
+        done: false,
+        repeat: 'None',
+        uid: currentUid,
+        linkedTaskId: null,
+        reminded: false,
+        createdAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error('Failed to quick add to-do:', err);
+    }
+  };
+
+  const handleToggleTodoDone = async (todoId, doneState) => {
+    try {
+      await updateDoc(doc(db, 'todos', todoId), {
+        done: doneState,
+        completedAt: doneState ? serverTimestamp() : null
+      });
+    } catch (err) {
+      console.error('Failed to toggle to-do done state:', err);
+    }
+  };
+
+  const handleFollowUpTask = async (task) => {
+    try {
+      const todayDateObj = new Date();
+      todayDateObj.setHours(todayDateObj.getHours() + 2);
+
+      await addDoc(collection(db, 'todos'), {
+        title: `Follow-up: ${task.title}`,
+        notes: `Assigned to: ${task.assignedToName || 'Team'}. Status: ${task.status}`,
+        dueAt: Timestamp.fromDate(todayDateObj),
+        remindAt: Timestamp.fromDate(todayDateObj),
+        priority: task.priority || 'Medium',
+        done: false,
+        repeat: 'None',
+        uid: currentUid,
+        linkedTaskId: task.id,
+        reminded: false,
+        createdAt: serverTimestamp()
+      });
+
+      alert(`Follow-up added to your Personal Planner for "${task.title}"`);
+    } catch (err) {
+      console.error('Failed to add follow-up to to-dos:', err);
+    }
+  };
+
+  // Loading Screen
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-6 space-y-4">
+        <div className="w-12 h-12 rounded-2xl bg-[#05331F] flex items-center justify-center font-bold text-white shadow-xl animate-pulse text-lg">
+          SS
+        </div>
+        <div className="text-center">
+          <p className="text-sm font-bold text-slate-800">STARK STEEL DOORS</p>
+          <p className="text-xs text-slate-400">Loading SalesDoor Enterprise Platform...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Unauthenticated
+  if (!currentUser) {
+    return <LoginScreen />;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-100/70 text-slate-900 font-sans flex">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-row">
       
-      {/* Systematic Left Navigation Sidebar */}
+      {/* Toast Notification Alert */}
+      {toastMessage && (
+        <div className="fixed top-4 right-4 z-50 bg-rose-900 text-white px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-2 text-xs font-semibold animate-in slide-in-from-top duration-200">
+          <AlertCircle className="w-4 h-4 text-rose-300 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* 1. Left Navigation Sidebar (In-flow fixed width column on desktop, NO double margin) */}
       <Sidebar
         currentUser={activeEmployee}
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={(tab, sub) => {
+          navigateToTabSafe(tab, sub);
+          setIsMobileMoreOpen(false);
+        }}
         employeeSubFilter={employeeSubFilter}
         onSubFilterChange={setEmployeeSubFilter}
         taskCounts={taskCounts}
         pendingApprovalsCount={pendingApprovals.length}
+        escalationsCount={escalationsCount}
+        dueRemindersCount={dueRemindersCount}
         onOpenAssignModal={() => setIsAssignModalOpen(true)}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
@@ -239,42 +440,99 @@ export default function App() {
         onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
       />
 
-      {/* Main Canvas - Adjusts automatically to sidebar width */}
-      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${
-        isSidebarCollapsed ? 'lg:pl-[72px]' : 'lg:pl-64'
-      }`}>
+      {/* 2. Main Content Wrapper: flex-1 min-w-0, no duplicate ml-* offset */}
+      <div className="flex-1 min-w-0 flex flex-col">
         
         {/* Top Navbar */}
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
-          <div className="px-4 sm:px-6 lg:px-8 py-3 sm:py-3.5 flex items-center justify-between gap-4">
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs w-full">
+          <div className="w-full px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between gap-4">
             
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-[#05331F] text-emerald-300 flex items-center justify-center font-bold lg:hidden shrink-0 shadow-xs">
-                <Building2 className="w-4 h-4" />
-              </div>
+              <button
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="w-8 h-8 rounded-xl bg-[#05331F] text-emerald-300 flex items-center justify-center font-bold lg:hidden shrink-0 shadow-xs"
+              >
+                <Menu className="w-4 h-4" />
+              </button>
 
-              <div>
-                <h1 className="text-sm sm:text-lg font-bold text-slate-900 flex items-center gap-1.5 sm:gap-2">
-                
-                  <span className="text-[9px] sm:text-[10px] bg-[#05331F]/10 text-[#05331F] font-bold px-1.5 sm:px-2 py-0.5 rounded-full">
-                   {activeEmployee.fullName || activeEmployee.name}  |  {activeEmployee.role}
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
+                  <span>{activeEmployee.fullName || activeEmployee.name}</span>
+                  <span className="text-[10px] bg-[#05331F]/10 text-[#05331F] font-bold px-2 py-0.5 rounded-full">
+                    {activeEmployee.role}
                   </span>
                 </h1>
-             
+
+                {/* Quick Search Trigger Pill */}
+                <button
+                  onClick={() => setIsQuickSearchOpen(true)}
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/70 text-slate-500 text-[11px] font-medium transition ml-2 border border-slate-200"
+                >
+                  <Search className="w-3 h-3 text-slate-400" />
+                  <span>Search</span>
+                  <kbd className="text-[9px] bg-white px-1.5 py-0.5 rounded border border-slate-200 text-slate-500 font-mono">
+                    Ctrl K
+                  </kbd>
+                </button>
               </div>
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* PWA Install Button (Desktop & Mobile, hides when already installed) */}
+              {/* Dev Role Switcher */}
+              <DevRoleSwitcher 
+                activeEmployee={activeEmployee} 
+                onSwitchRole={(persona) => {
+                  setDevOverrideUser(persona);
+                  setActiveTab('dashboard');
+                }} 
+              />
+
+              {/* PWA Install Button */}
               <PwaInstallPrompt />
 
-              {/* Notifications */}
-              <div className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer">
-                <Bell className="w-4 h-4" />
-                {notifications.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-amber-500 text-white font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center">
-                    {notifications.length}
-                  </span>
+              {/* Alerts Dropdown Bell */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsAlertsOpen(prev => !prev)}
+                  className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-xl transition"
+                  title="Operational Alerts"
+                >
+                  <Bell className="w-4 h-4" />
+                  {systemAlerts.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-rose-600 text-white font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                      {systemAlerts.length}
+                    </span>
+                  )}
+                </button>
+
+                {/* Alerts Popover */}
+                {isAlertsOpen && (
+                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="text-xs font-bold text-slate-900">Task & Planner Alerts</span>
+                      <span className="text-[10px] font-semibold text-slate-400">{systemAlerts.length} active</span>
+                    </div>
+
+                    {systemAlerts.length === 0 ? (
+                      <p className="text-xs text-slate-400 py-4 text-center">No active alerts at this moment</p>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {systemAlerts.map(a => (
+                          <div 
+                            key={a.id}
+                            onClick={() => {
+                              navigateToTabSafe(a.actionTab);
+                              setIsAlertsOpen(false);
+                            }}
+                            className="p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 cursor-pointer transition text-xs border border-slate-100"
+                          >
+                            <p className="font-bold text-slate-800">{a.title}</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{a.desc}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -287,207 +545,305 @@ export default function App() {
                 <LogOut className="w-4 h-4" />
               </button>
 
-              {/* Assign Task Button - Visible strictly to authorized users */}
-              {(isLeadership || hasPermission(activeEmployee, 'assign_tasks') || hasPermission(activeEmployee, 'create_tasks')) && (
+              {/* Single Primary Assign Task Button in Top Bar (Hidden for frontline sales coordinators unless authorized) */}
+              {(userScope === SCOPES.COMPANY || userScope === SCOPES.DEPARTMENT || userScope === SCOPES.DOWNLINE) && (
                 <button
                   onClick={() => setIsAssignModalOpen(true)}
-                  className="flex items-center gap-1.5 bg-[#05331F] text-white hover:bg-[#07472c] px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl text-xs font-bold shadow-md transition-all shrink-0"
+                  className="flex items-center gap-1.5 bg-[#05331F] text-white hover:bg-[#07472B] px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition shrink-0"
                 >
-                  <PlusCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-300" />
-                  <span className="hidden sm:inline">Assign Task</span>
+                  <PlusCircle className="w-4 h-4 text-emerald-400" />
+                  <span>Assign Task</span>
                 </button>
               )}
             </div>
           </div>
         </header>
 
-        {/* Main Body */}
-        <main className="p-3 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 flex-1 pb-24 lg:pb-8">
-          {/* VIEW 1: Company Performance Dashboard */}
-          {activeTab === 'dashboard' && (
-            <CompanyDashboardView 
-              tasks={tasks} 
-              departments={departments}
-              employees={employees}
-              currentUser={activeEmployee} 
-              onNavigateToTab={setActiveTab}
-              onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
-              onOpenAssignModal={() => setIsAssignModalOpen(true)}
-            />
-          )}
-
-          {/* VIEW 2: Organization Management & Real Employee Directory */}
-          {activeTab === 'organization' && (
-            <OrganizationManagementView
-              departments={departments}
-              designations={designations}
-              employees={employees}
-              teams={teams}
-              teamMembers={teamMembers}
-              currentUser={activeEmployee}
-              onOpenAddEmployee={() => setIsAddEmployeeModalOpen(true)}
-              onEmployeeAdded={(newEmp) => setEmployees(prev => [...prev, newEmp])}
-              onEmployeeUpdated={(updatedEmp) => {
-                setEmployees(prev => prev.map(e => e.id === updatedEmp.id ? updatedEmp : e));
-              }}
-              onEmployeeDeleted={(delId) => {
-                setEmployees(prev => prev.filter(e => e.id !== delId));
-              }}
-              onDesignationUpdated={(updatedDes) => {
-                setDesignations(prev => prev.map(d => d.id === updatedDes.id ? updatedDes : d));
-              }}
-            />
-          )}
-
-          {/* VIEW 2.5: Team Management Module */}
-          {activeTab === 'teams' && (
-            <TeamManagementView
-              teams={teams}
-              teamMembers={teamMembers}
-              employees={employees}
-              departments={departments}
-              currentUser={activeEmployee}
-              onOpenAssignModal={(preset) => {
-                setAssignModalPreset(preset || null);
-                setIsAssignModalOpen(true);
-              }}
-              onTeamCreated={(newTeam) => {
-                setTeams(prev => {
-                  const updated = [...prev, newTeam];
-                  try { localStorage.setItem('salesdoor_teams_cache', JSON.stringify(updated)); } catch {}
-                  return updated;
-                });
-              }}
-              onTeamUpdated={(upTeam) => {
-                setTeams(prev => {
-                  const updated = prev.map(t => t.id === upTeam.id ? upTeam : t);
-                  try { localStorage.setItem('salesdoor_teams_cache', JSON.stringify(updated)); } catch {}
-                  return updated;
-                });
-              }}
-              onTeamMembersUpdated={(updatedMembers) => {
-                setTeamMembers(updatedMembers);
-                try { localStorage.setItem('salesdoor_team_members_cache', JSON.stringify(updatedMembers)); } catch {}
-              }}
-            />
-          )}
-
-          {/* VIEW 3: Supervisor Review Queue */}
-          {activeTab === 'approvals' && (
-            <div className="space-y-4">
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Tasks Awaiting Review & Sign-Off</h3>
-                  <p className="text-xs text-slate-500">
-                    Review queue for: <span className="font-semibold text-slate-800">{activeEmployee.fullName || activeEmployee.name}</span>
-                  </p>
-                </div>
-                <span className="text-xs font-bold bg-amber-100 text-amber-800 px-3 py-1 rounded-full border border-amber-200">
-                  {pendingApprovals.length} Pending
-                </span>
+        {/* Global Announcement Banner */}
+        {announcements.length > 0 && (
+          <div className="bg-[#05331F] text-white px-4 sm:px-6 lg:px-8 py-2.5 text-xs flex items-center justify-between border-b border-[#07472B] w-full">
+            <div className="w-full flex items-center justify-between">
+              <div className="flex items-center gap-2 truncate">
+                <Megaphone className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-semibold">{announcements[0].title || 'Company Notice'}:</span>
+                <span className="text-emerald-100/90 truncate">{announcements[0].message}</span>
               </div>
-
-              {pendingApprovals.length === 0 ? (
-                <div className="bg-white rounded-3xl p-10 text-center border border-slate-200 text-slate-400 space-y-2">
-                  <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500/50" />
-                  <p className="font-semibold text-sm text-slate-600">All submissions are reviewed!</p>
-                  <p className="text-xs">No pending approvals assigned to your account right now.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {pendingApprovals.map(t => (
-                    <div key={t.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-700">{t.id}</span>
-                        <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full border border-amber-200">
-                          Pending Sign-Off
-                        </span>
-                      </div>
-
-                      <h4 className="font-bold text-sm text-slate-900">{t.title}</h4>
-                      <p className="text-xs text-slate-600">{t.description}</p>
-
-                      <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-100 text-xs space-y-1">
-                        <div className="text-slate-500">Submitted by: <span className="font-semibold text-slate-800">{t.assignedToName}</span></div>
-                        {t.submissionNotes && (
-                          <div className="text-slate-700 italic">"{t.submissionNotes}"</div>
-                        )}
-                      </div>
-
-                      <div className="pt-2 flex justify-end">
-                        <button
-                          onClick={() => setSelectedTaskForApproval(t)}
-                          className="flex items-center gap-1.5 px-4 py-2 bg-[#05331F] hover:bg-[#07472c] text-white rounded-2xl text-xs font-bold shadow-xs transition-all"
-                        >
-                          <CheckCheck className="w-4 h-4" />
-                          <span>Review & Decide</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <span className="text-[10px] text-emerald-300 font-medium shrink-0 ml-2">
+                {announcements[0].department === 'all' ? 'All Personnel' : announcements[0].department}
+              </span>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* VIEW 3.5: Escalations & Incident Log */}
-          {activeTab === 'escalations' && (
-            <EscalationsView
-              tasks={tasks}
-              currentUser={activeEmployee}
-            />
-          )}
+        {/* Main Body */}
+        <main className="w-full flex-1 px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
+          <div className="w-full space-y-6">
+            
+            {/* VIEW 1: Performance Dashboard (Tailored strictly by scope) */}
+            {activeTab === 'dashboard' && (
+              <CompanyDashboardView 
+                tasks={tasks} 
+                departments={departments}
+                employees={employees}
+                teams={teams}
+                currentUser={activeEmployee}
+                todos={userTodos}
+                bookings={dealerBookings}
+                onNavigateToTab={navigateToTabSafe}
+                onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
+                onOpenAssignModal={() => setIsAssignModalOpen(true)}
+                onQuickAddTodo={handleDashboardQuickAddTodo}
+                onToggleTodoDone={handleToggleTodoDone}
+              />
+            )}
 
-          {/* VIEW 3.6: SOP Templates & Auto Task Scheduler */}
-          {activeTab === 'templates' && (
-            <SopTemplatesView
-              employees={employees}
-              departments={departments}
-              currentUser={activeEmployee}
-            />
-          )}
+            {/* VIEW 1.5: Team Performance View (Company, Dept & Downline scopes) */}
+            {activeTab === 'team_performance' && canAccess(activeEmployee, PAGES.TEAM_PERFORMANCE) && (
+              <TeamPerformanceView
+                employees={employees}
+                tasks={tasks}
+                departments={departments}
+                teams={teams}
+                currentUser={activeEmployee}
+                onOpenAssignModal={(preset) => {
+                  setAssignModalPreset(preset || null);
+                  setIsAssignModalOpen(true);
+                }}
+                onNavigateToTab={navigateToTabSafe}
+                onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
+              />
+            )}
 
-          {/* VIEW 3.8: Dedicated Dealers Directory View */}
-          {activeTab === 'dealers' && (
-            <DealersDirectoryView
-              currentUser={activeEmployee}
-              tasks={tasks}
-              onOpenAssignOrderModal={(prefill) => {
-                setAssignModalPreset(prefill);
-                setIsAssignModalOpen(true);
-              }}
-            />
-          )}
+            {/* VIEW 2: Dealer Bookings (Daily Order Management) */}
+            {activeTab === 'bookings' && canAccess(activeEmployee, PAGES.BOOKINGS) && (
+              <DealerBookingsView
+                currentUser={activeEmployee}
+                bookings={dealerBookings}
+                dealers={dealers}
+                employees={employees}
+                onOpenAssignOrderModal={(preset) => {
+                  setAssignModalPreset(preset);
+                  setIsAssignModalOpen(true);
+                }}
+                onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
+              />
+            )}
 
-          {/* VIEW 3.9: To-Do & Reminders */}
-          {activeTab === 'todos' && (
-            <TodoReminders
-              currentUser={activeEmployee}
-            />
-          )}
+            {/* VIEW 2.5: Dedicated Dealers Directory View */}
+            {activeTab === 'dealers' && canAccess(activeEmployee, PAGES.DEALERS) && (
+              <DealersDirectoryView
+                currentUser={activeEmployee}
+                dealers={dealers}
+                bookings={dealerBookings}
+                employees={employees}
+                onOpenAssignOrderModal={(prefill) => {
+                  setAssignModalPreset(prefill);
+                  setIsAssignModalOpen(true);
+                }}
+                onNavigateToTab={navigateToTabSafe}
+              />
+            )}
 
-          {/* VIEW 4: TaskPulse-Style Team & Employee Task Tracking View */}
-          {activeTab === 'my_tasks' && (
-            <TaskPulseTeamView
-              tasks={tasks}
-              employees={employees}
-              teams={teams}
-              teamMembers={teamMembers}
-              departments={departments}
-              currentUser={activeEmployee}
-              onTaskUpdated={handleTaskUpdated}
-              onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
-              onOpenAssignModal={() => setIsAssignModalOpen(true)}
-            />
-          )}
+            {/* VIEW 3: Organization Management & Real Employee Directory (Company scope only) */}
+            {activeTab === 'organization' && canAccess(activeEmployee, PAGES.ORGANIZATION) && (
+              <OrganizationManagementView
+                departments={departments}
+                designations={designations}
+                employees={employees}
+                teams={teams}
+                teamMembers={teamMembers}
+                currentUser={activeEmployee}
+                onOpenAddEmployee={() => setIsAddEmployeeModalOpen(true)}
+                onEmployeeAdded={(newEmp) => setEmployees(prev => [...prev, newEmp])}
+                onEmployeeUpdated={(updatedEmp) => {
+                  setEmployees(prev => prev.map(e => e.id === updatedEmp.id ? updatedEmp : e));
+                }}
+                onEmployeeDeleted={(delId) => {
+                  setEmployees(prev => prev.filter(e => e.id !== delId));
+                }}
+                onDesignationUpdated={(updatedDes) => {
+                  setDesignations(prev => prev.map(d => d.id === updatedDes.id ? updatedDes : d));
+                }}
+              />
+            )}
 
+            {/* VIEW 3.5: Team Management Module */}
+            {activeTab === 'teams' && canAccess(activeEmployee, PAGES.TEAMS) && (
+              <TeamManagementView
+                teams={teams}
+                teamMembers={teamMembers}
+                employees={employees}
+                departments={departments}
+                currentUser={activeEmployee}
+                onOpenAssignModal={(preset) => {
+                  setAssignModalPreset(preset || null);
+                  setIsAssignModalOpen(true);
+                }}
+                onTeamCreated={(newTeam) => {
+                  setTeams(prev => {
+                    const updated = [...prev, newTeam];
+                    try { localStorage.setItem('salesdoor_teams_cache', JSON.stringify(updated)); } catch {}
+                    return updated;
+                  });
+                }}
+                onTeamUpdated={(upTeam) => {
+                  setTeams(prev => {
+                    const updated = prev.map(t => t.id === upTeam.id ? upTeam : t);
+                    try { localStorage.setItem('salesdoor_teams_cache', JSON.stringify(updated)); } catch {}
+                    return updated;
+                  });
+                }}
+                onTeamMembersUpdated={(updatedMembers) => {
+                  setTeamMembers(updatedMembers);
+                  try { localStorage.setItem('salesdoor_team_members_cache', JSON.stringify(updatedMembers)); } catch {}
+                }}
+              />
+            )}
+
+            {/* VIEW 4: Approvals & Exception Queue */}
+            {activeTab === 'approvals' && canAccess(activeEmployee, PAGES.APPROVALS) && (
+              <div className="space-y-4">
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900">Approvals & Sign-Off Queue</h2>
+                    <p className="text-xs text-slate-500">
+                      Sign-off requests waiting for your approval
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold bg-amber-100 text-amber-800 px-3 py-1 rounded-full border border-amber-200">
+                    {pendingApprovals.length} Pending
+                  </span>
+                </div>
+
+                {pendingApprovals.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-10 text-center border border-slate-200 text-slate-400 space-y-2">
+                    <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500/50" />
+                    <p className="font-semibold text-sm text-slate-600">All submissions are reviewed!</p>
+                    <p className="text-xs">No pending sign-offs waiting for your account right now.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {pendingApprovals.map(t => (
+                      <div key={t.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold bg-slate-100 px-2 py-0.5 rounded text-slate-700">
+                            {t.departmentName || t.department || 'Sales'}
+                          </span>
+                          <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full border border-amber-200">
+                            Pending Sign-Off
+                          </span>
+                        </div>
+
+                        <h3 className="font-bold text-sm text-slate-900">{t.title}</h3>
+                        <p className="text-xs text-slate-600">{t.description}</p>
+
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs space-y-1">
+                          <div className="text-slate-500">Assignee: <span className="font-semibold text-slate-800">{t.assignedToName}</span></div>
+                          {t.submissionNotes && (
+                            <div className="text-slate-700 italic">"{t.submissionNotes}"</div>
+                          )}
+                        </div>
+
+                        <div className="pt-2 flex items-center justify-between">
+                          <button
+                            onClick={() => handleFollowUpTask(t)}
+                            className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-[#05331F] font-semibold"
+                            title="Bookmark follow-up in my to-dos"
+                          >
+                            <Bookmark className="w-3.5 h-3.5" />
+                            <span>Add to My Planner</span>
+                          </button>
+
+                          <button
+                            onClick={() => setSelectedTaskForApproval(t)}
+                            className="flex items-center gap-1.5 px-4 py-2 bg-[#05331F] hover:bg-[#07472B] text-white rounded-xl text-xs font-bold shadow-2xs transition"
+                          >
+                            <span>Review & Decide</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* VIEW 5: Escalations & Operational Bottlenecks (Company & Dept scope only) */}
+            {activeTab === 'escalations' && canAccess(activeEmployee, PAGES.ESCALATIONS) && (
+              <EscalationsView
+                tasks={tasks}
+                currentUser={activeEmployee}
+                onNudgeTask={async (taskId) => {
+                  try {
+                    await updateFirestoreTask(taskId, {
+                      lastNudgedAt: new Date().toISOString(),
+                      lastNudgedBy: activeEmployee.fullName || activeEmployee.name
+                    }, activeEmployee);
+                    alert('Nudge notification sent to assignee.');
+                  } catch (e) {
+                    alert('Nudge failed: ' + e.message);
+                  }
+                }}
+                onReassignTask={(task) => {
+                  setAssignModalPreset({
+                    title: `Reassigned: ${task.title}`,
+                    description: task.description,
+                    priority: TASK_PRIORITIES.HIGH,
+                    department: task.departmentId || task.department
+                  });
+                  setIsAssignModalOpen(true);
+                }}
+              />
+            )}
+
+            {/* VIEW 6: To-Do & Reminders (Personal Planner) */}
+            {activeTab === 'todos' && canAccess(activeEmployee, PAGES.TODOS) && (
+              <TodoReminders
+                currentUser={activeEmployee}
+                onOpenAssignModal={(preset) => {
+                  setAssignModalPreset(preset);
+                  setIsAssignModalOpen(true);
+                }}
+                onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
+              />
+            )}
+
+            {/* VIEW 7: Operational Reports (Company & Dept scopes) */}
+            {activeTab === 'reports' && canAccess(activeEmployee, PAGES.REPORTS) && (
+              <ReportsView
+                tasks={tasks}
+                employees={employees}
+              />
+            )}
+
+            {/* VIEW 8: All Tasks & Pulse View */}
+            {activeTab === 'my_tasks' && canAccess(activeEmployee, PAGES.MY_TASKS) && (
+              <TaskPulseTeamView
+                tasks={tasks}
+                employees={employees}
+                teams={teams}
+                teamMembers={teamMembers}
+                departments={departments}
+                currentUser={activeEmployee}
+                onTaskUpdated={handleTaskUpdated}
+                onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
+                onOpenAssignModal={() => setIsAssignModalOpen(true)}
+                onFollowUpTask={handleFollowUpTask}
+              />
+            )}
+
+          </div>
         </main>
 
         {/* MOBILE BOTTOM NAVIGATION BAR FOR PWA */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-2 flex items-center justify-around shadow-lg safe-pb">
           <button
-            onClick={() => setActiveTab('my_tasks')}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all ${
+            onClick={() => {
+              navigateToTabSafe('my_tasks');
+              setIsMobileMoreOpen(false);
+            }}
+            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition ${
               activeTab === 'my_tasks' ? 'text-[#05331F] font-bold' : 'text-slate-400'
             }`}
           >
@@ -495,50 +851,301 @@ export default function App() {
             <span className="text-[10px]">Tasks</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('teams')}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all ${
-              activeTab === 'teams' ? 'text-[#05331F] font-bold' : 'text-slate-400'
-            }`}
-          >
-            <Users className="w-5 h-5" />
-            <span className="text-[10px]">Team</span>
-          </button>
+          {isSales ? (
+            <button
+              onClick={() => {
+                navigateToTabSafe('bookings');
+                setIsMobileMoreOpen(false);
+              }}
+              className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition ${
+                activeTab === 'bookings' ? 'text-[#05331F] font-bold' : 'text-slate-400'
+              }`}
+            >
+              <Package className="w-5 h-5" />
+              <span className="text-[10px]">Bookings</span>
+            </button>
+          ) : (
+            canAccess(activeEmployee, PAGES.TEAM_PERFORMANCE) && (
+              <button
+                onClick={() => {
+                  navigateToTabSafe('team_performance');
+                  setIsMobileMoreOpen(false);
+                }}
+                className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition ${
+                  activeTab === 'team_performance' ? 'text-[#05331F] font-bold' : 'text-slate-400'
+                }`}
+              >
+                <Users className="w-5 h-5" />
+                <span className="text-[10px]">Team</span>
+              </button>
+            )
+          )}
 
-          {/* Quick Central Action Button */}
-          {(isLeadership || hasPermission(activeEmployee, 'assign_tasks') || hasPermission(activeEmployee, 'create_tasks')) && (
+          {/* Central Action Button */}
+          {(userScope === SCOPES.COMPANY || userScope === SCOPES.DEPARTMENT || userScope === SCOPES.DOWNLINE) && (
             <button
               onClick={() => setIsAssignModalOpen(true)}
-              className="w-11 h-11 -mt-5 rounded-2xl bg-[#05331F] text-white flex items-center justify-center shadow-lg active:scale-95 transition-all border-2 border-white"
+              className="w-11 h-11 -mt-5 rounded-2xl bg-[#05331F] text-white flex items-center justify-center shadow-lg active:scale-95 transition border-2 border-white"
               title="Assign Task"
             >
               <PlusCircle className="w-6 h-6 text-emerald-300" />
             </button>
           )}
 
-          <button
-            onClick={() => setActiveTab('dashboard')}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all ${
-              activeTab === 'dashboard' ? 'text-[#05331F] font-bold' : 'text-slate-400'
-            }`}
-          >
-            <BarChart3 className="w-5 h-5" />
-            <span className="text-[10px]">Reports</span>
-          </button>
+          {canAccess(activeEmployee, PAGES.REPORTS) && (
+            <button
+              onClick={() => {
+                navigateToTabSafe('reports');
+                setIsMobileMoreOpen(false);
+              }}
+              className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition ${
+                activeTab === 'reports' ? 'text-[#05331F] font-bold' : 'text-slate-400'
+              }`}
+            >
+              <BarChart3 className="w-5 h-5" />
+              <span className="text-[10px]">Reports</span>
+            </button>
+          )}
 
-          {/* More Menu Button - Opens Full Sidebar Drawer on Mobile */}
           <button
-            onClick={() => setIsMobileSidebarOpen(true)}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all ${
-              isMobileSidebarOpen ? 'text-[#05331F] font-bold' : 'text-slate-400 hover:text-[#05331F]'
+            onClick={() => setIsMobileMoreOpen(prev => !prev)}
+            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition relative ${
+              isMobileMoreOpen ? 'text-[#05331F] font-bold' : 'text-slate-400'
             }`}
-            title="All Pages & Menu"
           >
             <Menu className="w-5 h-5" />
             <span className="text-[10px]">More</span>
+            {dueRemindersCount > 0 && (
+              <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
+            )}
           </button>
         </nav>
+
+        {/* Mobile More Sheet */}
+        {isMobileMoreOpen && (
+          <div className="lg:hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex flex-col justify-end">
+            <div className="bg-white rounded-t-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom duration-200">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <span className="text-sm font-bold text-slate-900">All Modules & Shortcuts</span>
+                <button 
+                  onClick={() => setIsMobileMoreOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 3-column icon grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  onClick={() => { navigateToTabSafe('dashboard'); setIsMobileMoreOpen(false); }}
+                  className="p-3 rounded-2xl bg-slate-50 flex flex-col items-center gap-1.5 text-center"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#05331F] flex items-center justify-center">
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-semibold text-slate-700">Dashboard</span>
+                </button>
+
+                {isSales && (
+                  <>
+                    <button
+                      onClick={() => { navigateToTabSafe('bookings'); setIsMobileMoreOpen(false); }}
+                      className="p-3 rounded-2xl bg-slate-50 flex flex-col items-center gap-1.5 text-center"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center">
+                        <Package className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold text-slate-700">Bookings</span>
+                    </button>
+
+                    <button
+                      onClick={() => { navigateToTabSafe('dealers'); setIsMobileMoreOpen(false); }}
+                      className="p-3 rounded-2xl bg-slate-50 flex flex-col items-center gap-1.5 text-center"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+                        <Briefcase className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold text-slate-700">Dealers</span>
+                    </button>
+                  </>
+                )}
+
+                <button
+                  onClick={() => { navigateToTabSafe('todos'); setIsMobileMoreOpen(false); }}
+                  className="p-3 rounded-2xl bg-slate-50 flex flex-col items-center gap-1.5 text-center relative"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-semibold text-slate-700">Planner</span>
+                  {dueRemindersCount > 0 && (
+                    <span className="absolute top-2 right-4 w-2 h-2 rounded-full bg-[#10B981]" />
+                  )}
+                </button>
+
+                {canAccess(activeEmployee, PAGES.APPROVALS) && (
+                  <button
+                    onClick={() => { navigateToTabSafe('approvals'); setIsMobileMoreOpen(false); }}
+                    className="p-3 rounded-2xl bg-slate-50 flex flex-col items-center gap-1.5 text-center relative"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+                      <CheckSquare className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-700">Approvals</span>
+                    {pendingApprovals.length > 0 && (
+                      <span className="absolute top-2 right-4 w-2 h-2 rounded-full bg-amber-500" />
+                    )}
+                  </button>
+                )}
+
+                {canAccess(activeEmployee, PAGES.ESCALATIONS) && (
+                  <button
+                    onClick={() => { navigateToTabSafe('escalations'); setIsMobileMoreOpen(false); }}
+                    className="p-3 rounded-2xl bg-slate-50 flex flex-col items-center gap-1.5 text-center relative"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
+                      <ShieldAlert className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-700">Escalations</span>
+                    {escalationsCount > 0 && (
+                      <span className="absolute top-2 right-4 w-2 h-2 rounded-full bg-rose-500" />
+                    )}
+                  </button>
+                )}
+
+                <button
+                  onClick={() => { navigateToTabSafe('teams'); setIsMobileMoreOpen(false); }}
+                  className="p-3 rounded-2xl bg-slate-50 flex flex-col items-center gap-1.5 text-center"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-semibold text-slate-700">My Team</span>
+                </button>
+
+                {canAccess(activeEmployee, PAGES.ORGANIZATION) && (
+                  <button
+                    onClick={() => { navigateToTabSafe('organization'); setIsMobileMoreOpen(false); }}
+                    className="p-3 rounded-2xl bg-slate-50 flex flex-col items-center gap-1.5 text-center"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+                      <Building2 className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-700">Employees</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={() => logout()}
+                  className="w-full py-2.5 rounded-xl bg-slate-100 text-rose-600 font-semibold text-xs flex items-center justify-center gap-1.5"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Quick Search Dialog (Ctrl+K) */}
+      {isQuickSearchOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start justify-center p-4 pt-16">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in duration-150">
+            <div className="p-3.5 border-b border-slate-100 flex items-center gap-3">
+              <Search className="w-4 h-4 text-slate-400 shrink-0" />
+              <input
+                type="text"
+                autoFocus
+                placeholder="Search tasks, dealers or personnel across the company..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full text-xs outline-none bg-transparent"
+              />
+              <button 
+                onClick={() => setIsQuickSearchOpen(false)}
+                className="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded"
+              >
+                ESC
+              </button>
+            </div>
+
+            <div className="p-3 max-h-80 overflow-y-auto space-y-3 text-xs">
+              {searchQuery.trim() === '' ? (
+                <p className="text-slate-400 py-6 text-center text-xs">Type a keyword to search...</p>
+              ) : (
+                <>
+                  {quickSearchResults.dealers.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Dealers</p>
+                      <div className="space-y-1">
+                        {quickSearchResults.dealers.map(d => (
+                          <div 
+                            key={d.id}
+                            onClick={() => {
+                              navigateToTabSafe('dealers');
+                              setIsQuickSearchOpen(false);
+                            }}
+                            className="p-2 rounded-xl hover:bg-slate-50 cursor-pointer flex items-center justify-between"
+                          >
+                            <span className="font-semibold text-slate-800 truncate">{d.name}</span>
+                            <span className="text-[10px] text-slate-400">{d.region}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {quickSearchResults.tasks.length > 0 && (
+                    <div className="pt-2 border-t border-slate-100">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Tasks</p>
+                      <div className="space-y-1">
+                        {quickSearchResults.tasks.map(t => (
+                          <div 
+                            key={t.id}
+                            onClick={() => {
+                              setSelectedTaskForExec(t);
+                              setIsQuickSearchOpen(false);
+                            }}
+                            className="p-2 rounded-xl hover:bg-slate-50 cursor-pointer flex items-center justify-between"
+                          >
+                            <span className="font-semibold text-slate-800 truncate">{t.title}</span>
+                            <span className="text-[10px] text-slate-400">{t.assignedToName || 'Assigned'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {quickSearchResults.employees.length > 0 && (
+                    <div className="pt-2 border-t border-slate-100">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Employees</p>
+                      <div className="space-y-1">
+                        {quickSearchResults.employees.map(e => (
+                          <div 
+                            key={e.id}
+                            onClick={() => {
+                              navigateToTabSafe('team_performance');
+                              setIsQuickSearchOpen(false);
+                            }}
+                            className="p-2 rounded-xl hover:bg-slate-50 cursor-pointer flex items-center justify-between"
+                          >
+                            <span className="font-semibold text-slate-800 truncate">{e.fullName || e.name}</span>
+                            <span className="text-[10px] text-slate-400">{e.designation}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Task Assignment Modal */}
       <TaskAssignmentModal
@@ -558,16 +1165,16 @@ export default function App() {
 
       {/* Task Execution Modal */}
       <TaskExecutionModal
-        isOpen={Boolean(selectedTaskForExec)}
+        isOpen={!!selectedTaskForExec}
         onClose={() => setSelectedTaskForExec(null)}
         task={selectedTaskForExec}
         currentUser={activeEmployee}
         onTaskUpdated={handleTaskUpdated}
       />
 
-      {/* Supervisor Review Modal */}
+      {/* Supervisor Approval Modal */}
       <SupervisorApprovalModal
-        isOpen={Boolean(selectedTaskForApproval)}
+        isOpen={!!selectedTaskForApproval}
         onClose={() => setSelectedTaskForApproval(null)}
         task={selectedTaskForApproval}
         currentUser={activeEmployee}
@@ -578,53 +1185,12 @@ export default function App() {
       <AddEmployeeModal
         isOpen={isAddEmployeeModalOpen}
         onClose={() => setIsAddEmployeeModalOpen(false)}
+        currentUser={activeEmployee}
         departments={departments}
         designations={designations}
-        existingUsers={employees}
-        currentUser={activeEmployee}
+        employees={employees}
+        onEmployeeAdded={(newEmp) => setEmployees(prev => [...prev, newEmp])}
       />
-
-      {/* Immutable Audit Trail Modal */}
-      {selectedTaskForLogs && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Task Audit Trail & Governance</h3>
-                <p className="text-xs text-slate-500">{selectedTaskForLogs.title}</p>
-              </div>
-              <button 
-                onClick={() => setSelectedTaskForLogs(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 max-h-72 overflow-y-auto text-xs pr-1">
-              {(selectedTaskForLogs.auditLogs || []).map((log, idx) => (
-                <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-slate-500">
-                    <span className="font-bold text-[#05331F]">{log.action}</span>
-                    <span>{log.timestamp}</span>
-                  </div>
-                  <div className="text-[11px] text-slate-700 font-semibold">{log.performedByName}</div>
-                  <p className="text-slate-600 text-xs">{log.details}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-2 border-t flex justify-end">
-              <button
-                onClick={() => setSelectedTaskForLogs(null)}
-                className="px-4 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
-              >
-                Close Trail
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );

@@ -5,6 +5,9 @@ import {
 import { db } from './firebase';
 import { MASTER_DEPARTMENTS, MASTER_DESIGNATIONS } from './orgStructure';
 import { getTodayDateString } from './dateUtils';
+import { STARK_DEALER_DIRECTORY } from './dealerDirectory';
+
+import { getScope, getVisibleUserIds, SCOPES } from './permissions';
 
 /**
  * PRODUCTION FIRESTORE COLLECTIONS
@@ -21,6 +24,8 @@ export const AUDIT_COL = 'taskAuditLogs';
 export const NOTIFS_COL = 'notifications';
 export const RECURRING_COL = 'recurringTasks';
 export const ORG_SETTINGS_COL = 'organizationSettings';
+export const DEALERS_COL = 'dealers';
+export const DEALER_BOOKINGS_COL = 'dealerBookings';
 
 /**
  * Initializes the approved company structure (Departments, Designations, Users/Employees & Settings)
@@ -58,330 +63,498 @@ export async function initializeCompanyStructure() {
         dailyCutoffTime: '23:59:59',
         orderCutoffTime: '11:00 AM',
         dailyTargetDoors: 70,
-        initializedAt: serverTimestamp(),
-        initialized: true
+        createdAt: serverTimestamp()
       });
+
+      // 4. Seed official dealers if collection empty
+      const dealersSnap = await getDocs(collection(db, DEALERS_COL));
+      if (dealersSnap.empty) {
+        for (const dlr of STARK_DEALER_DIRECTORY.slice(0, 30)) {
+          batch.set(doc(db, DEALERS_COL, dlr.id), {
+            id: dlr.id,
+            name: dlr.name,
+            code: dlr.code,
+            region: dlr.region,
+            assignedStaff: dlr.assignedStaff,
+            assignedTo: dlr.assignedStaff,
+            phone: '+91 99000 ' + Math.floor(10000 + Math.random() * 90000),
+            email: dlr.staffEmail || 'dealer@starkdoors.com',
+            address: `${dlr.name}, ${dlr.region}`,
+            gstNumber: '32AABCS' + Math.floor(1000 + Math.random() * 9000) + 'A1Z5',
+            status: 'Active',
+            createdAt: serverTimestamp()
+          });
+        }
+      }
 
       await batch.commit();
       console.log('Company structure successfully initialized in Cloud Firestore.');
     }
   } catch (err) {
-    console.error('Error during company structure initialization:', err);
+    console.error('Error initializing company structure:', err);
   }
 }
 
 /**
- * Listen to live departments
+ * 1. Subscribe to Departments
  */
 export function subscribeToDepartments(callback) {
-  return onSnapshot(collection(db, DEPTS_COL), (snap) => {
+  const q = query(collection(db, DEPTS_COL), orderBy('id', 'asc'));
+  return onSnapshot(q, (snapshot) => {
     const list = [];
-    snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
     callback(list);
-  }, (err) => console.warn('Departments listen error:', err));
+  }, (err) => console.error('Departments sync error:', err));
 }
 
 /**
- * Listen to live designations
+ * 2. Subscribe to Designations
  */
 export function subscribeToDesignations(callback) {
-  return onSnapshot(collection(db, DESIGNATIONS_COL), (snap) => {
+  const q = query(collection(db, DESIGNATIONS_COL), orderBy('title', 'asc'));
+  return onSnapshot(q, (snapshot) => {
     const list = [];
-    snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
     callback(list);
-  }, (err) => console.warn('Designations listen error:', err));
+  }, (err) => console.error('Designations sync error:', err));
 }
 
 /**
- * Listen to real employees / users in Firestore
+ * 3. Subscribe to Real Employees Directory
  */
 export function subscribeToEmployees(callback) {
-  return onSnapshot(collection(db, USERS_COL), (snap) => {
+  const q = query(collection(db, EMPLOYEES_COL), orderBy('fullName', 'asc'));
+  return onSnapshot(q, (snapshot) => {
     const list = [];
-    snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
     callback(list);
-  }, (err) => console.warn('Employees listen error:', err));
+  }, (err) => console.error('Employees sync error:', err));
 }
 
 /**
- * Add or update employee in Firestore
+ * 4. Subscribe to Real Operational Teams
  */
-export async function saveEmployeeProfile(employeeData, adminUser) {
-  const docId = employeeData.id || `emp_${Date.now()}`;
-  const docRef = doc(db, USERS_COL, docId);
-
-  const payload = {
-    ...employeeData,
-    id: docId,
-    updatedAt: serverTimestamp(),
-  };
-
-  if (!employeeData.id) {
-    payload.createdAt = serverTimestamp();
-    payload.createdBy = adminUser ? adminUser.id : 'system';
-  }
-
-  await setDoc(docRef, payload, { merge: true });
-  return docId;
+export function subscribeToTeams(callback) {
+  const q = query(collection(db, TEAMS_COL), orderBy('name', 'asc'));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+    callback(list);
+  }, (err) => console.error('Teams sync error:', err));
 }
 
 /**
- * Subscribe to tasks with role-based filtering
- * General Manager & Executive Director see 100% of all company tasks live.
+ * 5. Subscribe to Real Team Members
  */
-export function subscribeToTasks(currentUser, callback) {
+export function subscribeToTeamMembers(callback) {
+  const q = query(collection(db, TEAM_MEMBERS_COL));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+    callback(list);
+  }, (err) => console.error('Team members sync error:', err));
+}
+
+/**
+ * 6. Subscribe to Real Tasks Stream
+ * Filters strictly by role scope (company, department, downline, self).
+ * For downline/in-queries, chunks at 30 to comply with Firestore 'in' limits.
+ */
+export function subscribeToTasks(currentUser, callback, allEmployees = []) {
   if (!currentUser) return () => {};
 
-  const tasksRef = collection(db, TASKS_COL);
-  let q = tasksRef;
+  const scope = getScope(currentUser);
+  const uid = String(currentUser.id || currentUser.uid || currentUser.employeeId || '');
 
-  const isCompanyLeadership = ['Director Operations', 'General Manager', 'Executive Director'].includes(currentUser.role);
-
-  if (isCompanyLeadership) {
-    q = query(tasksRef, orderBy('createdAt', 'desc'));
-  } else if (['HR Manager', 'Admin Manager', 'Accounts Manager', 'Warehouse In-charge', 
-               'Transport Manager', 'Service Manager', 'CSO', 'Brand Manager', 'IT Head'].includes(currentUser.role)) {
-    q = query(tasksRef, where('departmentId', '==', currentUser.department));
-  } else {
-    // Frontline employees: query where assignedToId matches or assigneeIds contains their ID
-    q = query(tasksRef, where('assigneeIds', 'array-contains', currentUser.id));
+  // 1. Company Scope: Reads all tasks ordered by creation
+  if (scope === SCOPES.COMPANY) {
+    const q = query(collection(db, TASKS_COL), orderBy('createdAt', 'desc'));
+    return onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+      callback(list);
+    }, (err) => {
+      console.error('Company tasks listener error:', err);
+      // Fallback
+      const fallbackQ = query(collection(db, TASKS_COL));
+      return onSnapshot(fallbackQ, (fallbackSnap) => {
+        const list = [];
+        fallbackSnap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        callback(list);
+      });
+    });
   }
 
-  return onSnapshot(q, (snapshot) => {
-    const taskList = [];
-    snapshot.forEach(docSnap => {
-      taskList.push({ id: docSnap.id, ...docSnap.data() });
+  // 2. Department Scope: Server-side query by department / departmentId
+  if (scope === SCOPES.DEPARTMENT) {
+    const userDept = (currentUser.department || currentUser.departmentId || '').toLowerCase();
+    const q = query(
+      collection(db, TASKS_COL),
+      where('departmentId', '==', userDept)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+      callback(list);
+    }, (err) => {
+      console.warn('Department task query failed, trying department name query:', err);
+      const qAlt = query(
+        collection(db, TASKS_COL),
+        where('department', '==', currentUser.department || userDept)
+      );
+      return onSnapshot(qAlt, (altSnap) => {
+        const list = [];
+        altSnap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        callback(list);
+      });
     });
-    callback(taskList);
-  }, (error) => {
-    console.error('Error listening to tasks:', error);
+  }
+
+  // 3. Downline Scope: Chunks visible user IDs at 30 for Firestore 'in' queries
+  if (scope === SCOPES.DOWNLINE) {
+    const visibleIds = getVisibleUserIds(currentUser, allEmployees);
+    
+    // If empty or only self
+    if (visibleIds.length <= 1) {
+      const q = query(collection(db, TASKS_COL), where('assignedToId', '==', uid));
+      return onSnapshot(q, (snapshot) => {
+        const list = [];
+        snapshot.forEach(d => list.push({ id: d.id, ...d.data() }));
+        callback(list);
+      });
+    }
+
+    // Chunking array at max 30 items
+    const chunkSize = 30;
+    const chunks = [];
+    for (let i = 0; i < visibleIds.length; i += chunkSize) {
+      chunks.push(visibleIds.slice(i, i + chunkSize));
+    }
+
+    const chunkResults = new Map();
+    const unsubs = chunks.map((chunk, idx) => {
+      const q = query(collection(db, TASKS_COL), where('assignedToId', 'in', chunk));
+      return onSnapshot(q, (snap) => {
+        const chunkList = [];
+        snap.forEach(d => chunkList.push({ id: d.id, ...d.data() }));
+        chunkResults.set(idx, chunkList);
+
+        // Aggregate results
+        const aggregated = [];
+        chunkResults.forEach(l => aggregated.push(...l));
+        callback(aggregated);
+      }, (err) => {
+        console.error(`Downline task chunk ${idx} error:`, err);
+      });
+    });
+
+    return () => unsubs.forEach(unsub => unsub());
+  }
+
+  // 4. Self Scope: Frontline personnel (strictly assignedToId == uid)
+  const q = query(
+    collection(db, TASKS_COL),
+    where('assignedToId', '==', uid)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+    callback(list);
+  }, (err) => {
+    console.error('Self tasks listener error:', err);
   });
 }
 
 /**
- * Create a new task in Firestore with immutable audit entry
+ * 7. Subscribe to User Notifications
  */
-export async function createFirestoreTask(taskData, creatorUser) {
+export function subscribeToNotifications(userId, callback) {
+  if (!userId) return () => {};
+  const q = query(
+    collection(db, NOTIFS_COL),
+    where('recipientId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+    callback(list);
+  }, (err) => console.error('Notifications sync error:', err));
+}
+
+/**
+ * 8. Subscribe to Dealers (Live Firestore with automatic fallback)
+ */
+export function subscribeToDealers(callback) {
+  const q = query(collection(db, DEALERS_COL), orderBy('name', 'asc'));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+    if (list.length > 0) {
+      callback(list);
+    } else {
+      // Return static default if Firestore collection is still being provisioned
+      callback(STARK_DEALER_DIRECTORY.map(d => ({
+        ...d,
+        phone: '+91 99000 00100',
+        email: d.staffEmail || 'dealer@starkdoors.com',
+        status: 'Active',
+        assignedTo: d.assignedStaff
+      })));
+    }
+  }, (err) => {
+    console.warn('Dealers subscription error, falling back to local master:', err);
+    callback(STARK_DEALER_DIRECTORY.map(d => ({
+      ...d,
+      phone: '+91 99000 00100',
+      email: d.staffEmail || 'dealer@starkdoors.com',
+      status: 'Active',
+      assignedTo: d.assignedStaff
+    })));
+  });
+}
+
+/**
+ * 9. Subscribe to Dealer Bookings
+ */
+export function subscribeToDealerBookings(callback) {
+  const q = query(collection(db, DEALER_BOOKINGS_COL), orderBy('bookedAt', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+    callback(list);
+  }, (err) => console.error('Dealer bookings sync error:', err));
+}
+
+/**
+ * Creates a new task in Firestore
+ */
+export async function createFirestoreTask(taskData, creator) {
   const todayStr = getTodayDateString();
-  const timeNow = new Date().toLocaleTimeString();
+  const timestamp = new Date().toISOString();
 
-  const auditEntry = {
-    id: `log-${Date.now()}`,
-    action: 'CREATED',
-    performedById: creatorUser.id,
-    performedByName: `${creatorUser.fullName || creatorUser.name} (${creatorUser.role})`,
-    timestamp: `${todayStr} ${timeNow}`,
-    details: `Task created and assigned to ${taskData.assignedToName}`
-  };
-
-  const payload = {
+  const taskPayload = {
     ...taskData,
-    createdAt: `${todayStr} ${timeNow}`,
-    lastUpdated: `${todayStr} ${timeNow}`,
-    auditLogs: [auditEntry],
-    serverTimestamp: serverTimestamp()
+    createdById: creator.id || creator.uid,
+    createdByName: creator.fullName || creator.name,
+    createdByRole: creator.role,
+    createdAt: timestamp,
+    lastUpdated: timestamp,
+    taskDate: taskData.taskDate || todayStr,
+    status: taskData.status || 'Pending',
+    progressPercentage: taskData.progressPercentage || 0,
+    parentTaskId: taskData.parentTaskId || null,
+    chainPath: taskData.chainPath || null,
+    auditLogs: [
+      {
+        id: `log-${Date.now()}`,
+        action: 'TASK_CREATED',
+        performedById: creator.id || creator.uid,
+        performedByName: `${creator.fullName || creator.name} (${creator.role})`,
+        timestamp,
+        details: taskData.description || 'Task assigned'
+      },
+      ...(taskData.auditLogs || [])
+    ]
   };
 
-  const docRef = await addDoc(collection(db, TASKS_COL), payload);
-
-  // Trigger in-app notification to assignee
-  if (taskData.assignedToId) {
-    await addDoc(collection(db, NOTIFS_COL), {
-      recipientId: taskData.assignedToId,
-      title: 'New Task Assigned',
-      message: `${creatorUser.fullName || creatorUser.name} assigned you: ${taskData.title}`,
-      timestamp: `Today at ${timeNow}`,
-      read: false,
-      taskId: docRef.id,
-      createdAt: serverTimestamp()
-    });
-  }
-
+  const docRef = await addDoc(collection(db, TASKS_COL), taskPayload);
   return docRef.id;
 }
 
 /**
- * Update an existing task in Firestore
- * Enforces SalesDoor Pro daily dealer call locking rule.
+ * Updates an existing task with audit logging
  */
-export async function updateFirestoreTask(taskId, updateData, currentUser) {
+export async function updateFirestoreTask(taskId, updateData, user) {
+  const timestamp = new Date().toISOString();
   const taskRef = doc(db, TASKS_COL, taskId);
-  const taskSnap = await getDoc(taskRef);
 
-  if (!taskSnap.exists()) {
-    throw new Error('Task not found');
-  }
+  const existingSnap = await getDoc(taskRef);
+  const existingData = existingSnap.exists() ? existingSnap.data() : {};
 
-  const existingTask = taskSnap.data();
-
-  // Enforce SalesDoor Pro daily dealer call locking rule
-  if (existingTask.taskType === 'dealer_call') {
-    const todayStr = getTodayDateString();
-    if (existingTask.taskDate && existingTask.taskDate < todayStr) {
-      const isExec = ['Director Operations', 'General Manager', 'Executive Director'].includes(currentUser.role);
-      if (!isExec) {
-        throw new Error('Action Denied: Historical dealer call records are permanently locked after midnight.');
-      }
-    }
-  }
-
-  const todayStr = getTodayDateString();
-  const timeNow = new Date().toLocaleTimeString();
-
-  const auditEntry = {
+  const auditLog = {
     id: `log-${Date.now()}`,
-    action: updateData.auditAction || 'STATUS_UPDATE',
-    performedById: currentUser.id,
-    performedByName: `${currentUser.fullName || currentUser.name} (${currentUser.role})`,
-    timestamp: `${todayStr} ${timeNow}`,
-    details: updateData.auditDetails || `Task updated to ${updateData.status || existingTask.status}`
+    action: updateData.status ? `STATUS_UPDATED_${updateData.status.toUpperCase()}` : 'TASK_UPDATED',
+    performedById: user.id || user.uid,
+    performedByName: `${user.fullName || user.name} (${user.role})`,
+    timestamp,
+    details: updateData.submissionNotes || updateData.approvalRemarks || 'Task updated'
   };
 
-  const payload = {
+  const mergedLogs = [auditLog, ...(existingData.auditLogs || [])];
+
+  await updateDoc(taskRef, {
     ...updateData,
-    lastUpdated: `${todayStr} ${timeNow}`,
-    auditLogs: [auditEntry, ...(existingTask.auditLogs || [])],
-    updatedAt: serverTimestamp()
+    lastUpdated: timestamp,
+    auditLogs: mergedLogs
+  });
+}
+
+/**
+ * Creates a Dealer Booking and its linked automated task chain
+ * Chain: (1) Verify payment token (Accounts) -> (2) Pick doors (Warehouse) -> (3) Load and dispatch (Transport)
+ */
+export async function createDealerBookingWithChain(bookingData, user) {
+  const timestamp = new Date().toISOString();
+  const now = new Date();
+  const bookingDate = bookingData.bookingDate || getTodayDateString();
+
+  // 11:00 AM cutoff check: A booking saved after 11:00 AM gets a "Late order" flag
+  const isAfter11AM = now.getHours() > 11 || (now.getHours() === 11 && (now.getMinutes() > 0 || now.getSeconds() > 0));
+
+  const totalQuantity = (bookingData.lines || []).reduce((sum, line) => sum + (parseInt(line.quantity, 10) || 1), 0);
+
+  const initialStatus = isAfter11AM ? 'Pending Approval' : 'Booked';
+
+  const bookingPayload = {
+    dealerId: bookingData.dealerId,
+    dealerName: bookingData.dealerName,
+    dealerCode: bookingData.dealerCode || '',
+    region: bookingData.region || '',
+    assignedTo: bookingData.assignedTo || user.fullName || user.name,
+    assignedToId: bookingData.assignedToId || user.id || user.uid,
+    teamId: bookingData.teamId || 'sales',
+    lines: bookingData.lines || [],
+    totalQuantity,
+    requiredBy: bookingData.requiredBy,
+    bookedAt: timestamp,
+    bookingDate,
+    deliveryAddress: bookingData.deliveryAddress || '',
+    notes: bookingData.notes || '',
+    paymentSlipUrl: bookingData.paymentSlipUrl || null,
+    late: isAfter11AM,
+    status: initialStatus,
+    statusHistory: [
+      {
+        status: initialStatus,
+        performedBy: user.fullName || user.name,
+        performedByRole: user.role,
+        timestamp,
+        notes: isAfter11AM ? 'Booked after 11:00 AM cutoff. Sign-off requested from SSM/CSO.' : 'Initial booking logged.'
+      }
+    ],
+    linkedTaskIds: []
   };
 
-  delete payload.auditAction;
-  delete payload.auditDetails;
+  const bookingRef = await addDoc(collection(db, DEALER_BOOKINGS_COL), bookingPayload);
+  const bookingId = bookingRef.id;
 
-  await updateDoc(taskRef, payload);
+  // Linked Task 1: Verify Payment Token (Accounts Department)
+  const task1Id = await createFirestoreTask({
+    title: `[Token Clearance] ${bookingData.dealerName} - ${totalQuantity} Doors`,
+    description: `Verify advance payment token/credit clearance for required-by date: ${bookingData.requiredBy}. Delivery: ${bookingData.deliveryAddress}`,
+    department: 'finance',
+    departmentId: 'finance',
+    assignedToName: 'Accounts Manager',
+    assignedToId: 'emp_106',
+    priority: isAfter11AM ? 'High' : 'Medium',
+    deadlineDate: bookingData.requiredBy,
+    bookingId,
+    dealerName: bookingData.dealerName,
+    quantity: totalQuantity,
+    taskCategory: 'stark_door_order'
+  }, user);
 
-  // If status is PENDING_REVIEW, notify approval manager
-  if (updateData.status === 'Pending Review' && existingTask.approvalManagerId) {
-    await addDoc(collection(db, NOTIFS_COL), {
-      recipientId: existingTask.approvalManagerId,
-      title: 'Task Submission for Review',
-      message: `${currentUser.fullName || currentUser.name} submitted ${existingTask.title} for review.`,
-      timestamp: `Today at ${timeNow}`,
-      read: false,
-      taskId: taskId,
-      createdAt: serverTimestamp()
+  // Linked Task 2: Warehouse Picking (Warehouse Squad)
+  const task2Id = await createFirestoreTask({
+    title: `[Warehouse Picking] ${bookingData.dealerName} - ${totalQuantity} Doors`,
+    description: `Pick & quality pack doors for required-by date: ${bookingData.requiredBy}. Lines: ${(bookingData.lines || []).map(l => `${l.quantity}x ${l.model} (${l.finish || ''})`).join(', ')}`,
+    department: 'warehouse',
+    departmentId: 'warehouse',
+    assignedToName: 'Warehouse In-charge',
+    assignedToId: 'emp_166',
+    priority: 'Medium',
+    deadlineDate: bookingData.requiredBy,
+    bookingId,
+    parentTaskId: task1Id,
+    dealerName: bookingData.dealerName,
+    quantity: totalQuantity,
+    taskCategory: 'stark_door_order'
+  }, user);
+
+  // Linked Task 3: Loading & Dispatch (Transportation Squad)
+  const task3Id = await createFirestoreTask({
+    title: `[Dispatch Route] ${bookingData.dealerName} - ${totalQuantity} Doors`,
+    description: `Loading and dispatch delivery to ${bookingData.deliveryAddress} by required date: ${bookingData.requiredBy}.`,
+    department: 'transportation',
+    departmentId: 'transportation',
+    assignedToName: 'Transport Manager',
+    assignedToId: 'emp_176',
+    priority: 'Medium',
+    deadlineDate: bookingData.requiredBy,
+    bookingId,
+    parentTaskId: task2Id,
+    dealerName: bookingData.dealerName,
+    quantity: totalQuantity,
+    taskCategory: 'stark_door_order'
+  }, user);
+
+  // Update booking with linked task IDs
+  await updateDoc(bookingRef, {
+    linkedTaskIds: [task1Id, task2Id, task3Id]
+  });
+
+  return bookingId;
+}
+
+/**
+ * Update an employee profile in the users collection
+ */
+export async function saveEmployeeProfile(employeeId, data) {
+  const docRef = doc(db, USERS_COL, employeeId);
+  await updateDoc(docRef, {
+    ...data,
+    lastUpdated: serverTimestamp()
+  });
+  return employeeId;
+}
+
+/**
+ * Add or reassign a dealer
+ */
+export async function saveDealerRecord(dealerData, user) {
+  const timestamp = new Date().toISOString();
+
+  if (dealerData.id && !dealerData.id.startsWith('dlr_new_')) {
+    const docRef = doc(db, DEALERS_COL, dealerData.id);
+    const existingSnap = await getDoc(docRef);
+    const existing = existingSnap.exists() ? existingSnap.data() : {};
+
+    const reassignHistory = existing.reassignHistory || [];
+    if (dealerData.assignedStaff && dealerData.assignedStaff !== existing.assignedStaff) {
+      reassignHistory.push({
+        from: existing.assignedStaff || 'Unassigned',
+        to: dealerData.assignedStaff,
+        by: user.fullName || user.name,
+        timestamp
+      });
+    }
+
+    await updateDoc(docRef, {
+      ...dealerData,
+      assignedTo: dealerData.assignedStaff,
+      lastUpdated: timestamp,
+      reassignHistory
     });
+    return dealerData.id;
+  } else {
+    const payload = {
+      ...dealerData,
+      assignedTo: dealerData.assignedStaff || user.fullName || user.name,
+      createdAt: timestamp,
+      status: 'Active',
+      reassignHistory: [
+        {
+          from: 'None',
+          to: dealerData.assignedStaff || user.fullName || user.name,
+          by: user.fullName || user.name,
+          timestamp
+        }
+      ]
+    };
+    const ref = await addDoc(collection(db, DEALERS_COL), payload);
+    return ref.id;
   }
-}
-
-/**
- * Subscribe to notifications
- */
-export function subscribeToNotifications(userId, callback) {
-  if (!userId) return () => {};
-  const notifRef = collection(db, NOTIFS_COL);
-  const q = query(notifRef, where('recipientId', '==', userId));
-
-  return onSnapshot(q, (snapshot) => {
-    const list = [];
-    snapshot.forEach(d => list.push({ id: d.id, ...d.data() }));
-    callback(list);
-  }, (err) => console.warn('Notifications listener error:', err));
-}
-
-/**
- * --- TEAM MANAGEMENT MODULE FIRESTORE SERVICES ---
- */
-
-// Subscribe to teams
-export function subscribeToTeams(callback) {
-  return onSnapshot(collection(db, TEAMS_COL), (snapshot) => {
-    const list = [];
-    snapshot.forEach(d => list.push({ id: d.id, ...d.data() }));
-    callback(list);
-  }, (err) => console.warn('Teams listener error:', err));
-}
-
-// Subscribe to team members
-export function subscribeToTeamMembers(callback) {
-  return onSnapshot(collection(db, TEAM_MEMBERS_COL), (snapshot) => {
-    const list = [];
-    snapshot.forEach(d => list.push({ id: d.id, ...d.data() }));
-    callback(list);
-  }, (err) => console.warn('Team members listener error:', err));
-}
-
-// Create a new Team
-export async function createTeam(teamData, creatorUser) {
-  const teamRef = doc(collection(db, TEAMS_COL));
-  const todayStr = getTodayDateString();
-  const timeNow = new Date().toLocaleTimeString();
-
-  const payload = {
-    ...teamData,
-    id: teamRef.id,
-    createdById: creatorUser.id,
-    createdByName: `${creatorUser.fullName || creatorUser.name} (${creatorUser.role})`,
-    status: 'active',
-    createdAt: `${todayStr} ${timeNow}`,
-    memberCount: teamData.members?.length || 0,
-    serverTimestamp: serverTimestamp()
-  };
-
-  await setDoc(teamRef, payload);
-  return teamRef.id;
-}
-
-// Update Team (Edit title, description, department, status, leader)
-export async function updateTeam(teamId, updateData, user) {
-  const teamRef = doc(db, TEAMS_COL, teamId);
-  await updateDoc(teamRef, {
-    ...updateData,
-    updatedAt: serverTimestamp(),
-    lastModifiedBy: `${user.fullName || user.name} (${user.role})`
-  });
-}
-
-// Add members to Team with duplicate prevention & audit record
-export async function addTeamMembers(teamId, teamName, memberEmployees, addedByUser) {
-  const todayStr = getTodayDateString();
-  const timeNow = new Date().toLocaleTimeString();
-  const batch = writeBatch(db);
-
-  for (const emp of memberEmployees) {
-    // Unique composite ID: teamId_employeeId to strictly prevent duplicate membership
-    const memberDocRef = doc(db, TEAM_MEMBERS_COL, `${teamId}_${emp.id}`);
-    batch.set(memberDocRef, {
-      id: `${teamId}_${emp.id}`,
-      teamId,
-      teamName,
-      employeeId: emp.employeeId || emp.id,
-      userId: emp.id,
-      fullName: emp.fullName || emp.name,
-      role: emp.role,
-      department: emp.department || emp.departmentId,
-      email: emp.email,
-      addedById: addedByUser.id,
-      addedByName: `${addedByUser.fullName || addedByUser.name} (${addedByUser.role})`,
-      addedAt: `${todayStr} ${timeNow}`,
-      status: 'active',
-      serverTimestamp: serverTimestamp()
-    }, { merge: true });
-  }
-
-  await batch.commit();
-
-  // Update team member count
-  const allMembersSnap = await getDocs(query(collection(db, TEAM_MEMBERS_COL), where('teamId', '==', teamId), where('status', '==', 'active')));
-  await updateDoc(doc(db, TEAMS_COL, teamId), {
-    memberCount: allMembersSnap.size,
-    updatedAt: serverTimestamp()
-  });
-}
-
-// Remove member from Team
-export async function removeTeamMember(teamId, userId) {
-  const memberDocRef = doc(db, TEAM_MEMBERS_COL, `${teamId}_${userId}`);
-  await deleteDoc(memberDocRef);
-
-  const allMembersSnap = await getDocs(query(collection(db, TEAM_MEMBERS_COL), where('teamId', '==', teamId), where('status', '==', 'active')));
-  await updateDoc(doc(db, TEAMS_COL, teamId), {
-    memberCount: allMembersSnap.size,
-    updatedAt: serverTimestamp()
-  });
-}
-
-// Transfer team member to another team
-export async function transferTeamMember(fromTeamId, toTeamId, toTeamName, employee, user) {
-  await removeTeamMember(fromTeamId, employee.id);
-  await addTeamMembers(toTeamId, toTeamName, [employee], user);
 }
