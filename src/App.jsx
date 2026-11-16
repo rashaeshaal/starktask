@@ -150,7 +150,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
         <div className="text-center space-y-3">
           <div className="w-10 h-10 border-4 border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs font-semibold text-emerald-300">Connecting to Cloud Firestore...</p>
+         
         </div>
       </div>
     );
@@ -455,6 +455,26 @@ export default function App() {
               onOpenAssignOrderModal={(prefill) => {
                 setAssignModalPreset(prefill);
                 setIsAssignModalOpen(true);
+              }}
+            />
+          )}
+
+          {/* VIEW 3.9: To-Do & Reminders */}
+          {activeTab === 'todos' && (
+            <TodoReminderView
+              currentUser={activeEmployee}
+              departments={departments}
+              employees={employees}
+              onConvertToOfficialTask={(todo) => {
+                handleTaskCreated({
+                  title: todo.title,
+                  description: todo.description || '',
+                  priority: todo.priority || 'Medium',
+                  date: todayStr,
+                  taskDate: todayStr,
+                  status: 'In Progress'
+                });
+                setActiveTab('my_tasks');
               }}
             />
           )}

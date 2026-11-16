@@ -279,7 +279,7 @@ export default function TeamManagementView({
             <span className="text-xs font-bold text-[#05331F] bg-[#05331F]/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
               Corporate Team Management
             </span>
-            <span className="text-xs text-slate-400">• Real Cloud Firestore Stream</span>
+           
           </div>
           <h2 className="text-xl font-bold text-slate-900 mt-1">Operational Teams & Workgroups</h2>
           <p className="text-xs text-slate-500">
@@ -493,7 +493,7 @@ export default function TeamManagementView({
                   <h3 className="text-sm sm:text-base font-bold text-slate-900 truncate">
                     {editingTeam ? 'Edit Team Details & Leader' : 'Create New Operational Team'}
                   </h3>
-                  <p className="text-[11px] text-slate-500 truncate">Cloud Firestore Master Workgroup Setup</p>
+                
                 </div>
               </div>
               <button 

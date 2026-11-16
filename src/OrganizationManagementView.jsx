@@ -192,7 +192,7 @@ export default function OrganizationManagementView({
             <span className="text-[10px] sm:text-xs font-bold text-[#05331F] bg-[#05331F]/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
               Organization Management
             </span>
-            <span className="text-[11px] sm:text-xs text-slate-400">• Real Cloud Firestore Records</span>
+         
           </div>
           <h2 className="text-lg sm:text-xl font-bold text-slate-900 mt-1">Corporate Directory & Hierarchy</h2>
           <p className="text-xs text-slate-500">Departments, Designations, Employee Profiles & Reporting Lines</p>
@@ -308,7 +308,7 @@ export default function OrganizationManagementView({
             {filteredEmployees.length === 0 ? (
               <div className="col-span-full bg-white p-12 rounded-3xl border border-slate-200 text-center text-slate-400 space-y-2">
                 <Users className="w-10 h-10 mx-auto text-slate-300" />
-                <p className="font-bold text-slate-600">No employee records found in Cloud Firestore.</p>
+             
                 <p className="text-xs">Click "Add Employee" or "Import CSV" to add actual staff members.</p>
               </div>
             ) : (

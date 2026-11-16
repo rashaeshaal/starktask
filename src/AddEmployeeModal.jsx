@@ -102,9 +102,9 @@ export default function AddEmployeeModal({
             </div>
             <div className="truncate">
               <h3 className="text-sm sm:text-base font-bold text-slate-900 truncate">Add Real Employee Record</h3>
-              <p className="text-[11px] text-slate-500 truncate">Cloud Firestore Employee Directory</p>
+           
             </div>
-          </div>
+          </div>z
           <button 
             onClick={onClose}
             className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 shrink-0"
