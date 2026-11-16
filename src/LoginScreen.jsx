@@ -32,7 +32,12 @@ export default function LoginScreen() {
       }
     } catch (err) {
       console.error("Auth error:", err);
-      setErrorMsg(err.message.replace('Firebase: ', ''));
+      const code = err.code || '';
+      if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password') {
+        setErrorMsg("Account not found or password incorrect. If this is your first time logging into this new Firebase project, please click 'Register account' below to establish your password.");
+      } else {
+        setErrorMsg(err.message.replace('Firebase: ', ''));
+      }
     } finally {
       setIsSubmitting(false);
     }
