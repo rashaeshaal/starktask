@@ -106,9 +106,16 @@ export default function TeamManagementView({
   const isGlobalManager = isGlobalTeamManager(currentUser);
   const canUserManageAny = canManageTeam(currentUser);
 
-  // Departments this user is authorized to manage
+  // Departments this user is authorized to manage (normalized as { id, name })
   const allowedManageDepts = useMemo(() => {
-    return getAllowedManagementDepartments(currentUser, COMPANY_DEPARTMENTS);
+    const rawDepts = getAllowedManagementDepartments(currentUser, COMPANY_DEPARTMENTS);
+    return rawDepts.map(d => {
+      if (typeof d === 'object' && d !== null) {
+        return { id: d.id || d.name, name: d.name || d.id };
+      }
+      const matched = COMPANY_DEPARTMENTS.find(cd => cd.id === d);
+      return { id: d, name: matched ? matched.name : d };
+    });
   }, [currentUser]);
 
   // Filtered teams list based on hierarchy & permissions
@@ -162,7 +169,7 @@ export default function TeamManagementView({
   // Open Create Modal
   const handleOpenCreate = () => {
     setModalError('');
-    const defaultDept = allowedManageDepts[0] || 'operations';
+    const defaultDept = allowedManageDepts[0]?.id || 'operations';
     setTeamName('');
     setTeamDept(defaultDept);
     setTeamLeaderId('');
@@ -746,10 +753,9 @@ export default function TeamManagementView({
                     }}
                     className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
                   >
-                    {allowedManageDepts.map(deptId => {
-                      const dObj = COMPANY_DEPARTMENTS.find(d => d.id === deptId) || { name: deptId };
-                      return <option key={deptId} value={deptId}>{dObj.name}</option>;
-                    })}
+                    {allowedManageDepts.map(dept => (
+                      <option key={dept.id} value={dept.id}>{dept.name}</option>
+                    ))}
                   </select>
                 </div>
 

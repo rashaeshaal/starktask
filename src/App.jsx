@@ -826,6 +826,7 @@ export default function App() {
                 teamMembers={teamMembers}
                 departments={departments}
                 currentUser={activeEmployee}
+                onTaskCreated={handleTaskCreated}
                 onTaskUpdated={handleTaskUpdated}
                 onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
                 onOpenAssignModal={() => setIsAssignModalOpen(true)}

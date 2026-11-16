@@ -79,6 +79,7 @@ export default function TaskPulseTeamView({
   departments = [],
   currentUser,
   loading = false,
+  onTaskCreated,
   onTaskUpdated,
   onOpenTaskDetails
 }) {
@@ -918,7 +919,11 @@ export default function TaskPulseTeamView({
         currentUser={currentUser}
         departments={departments}
         onTaskCreated={(newTask) => {
-          if (onTaskUpdated) onTaskUpdated(newTask);
+          if (onTaskCreated) {
+            onTaskCreated(newTask);
+          } else if (onTaskUpdated) {
+            onTaskUpdated(newTask);
+          }
           showToast("Today's work logged successfully.", "success");
         }}
       />

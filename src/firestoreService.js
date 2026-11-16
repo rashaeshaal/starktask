@@ -272,14 +272,20 @@ export function subscribeToTasks(currentUser, callback, allEmployees = []) {
  */
 export function subscribeToNotifications(userId, callback) {
   if (!userId) return () => {};
+  // Query by recipientId only without orderBy to avoid requiring a composite index
   const q = query(
     collection(db, NOTIFS_COL),
-    where('recipientId', '==', userId),
-    orderBy('createdAt', 'desc')
+    where('recipientId', '==', userId)
   );
   return onSnapshot(q, (snapshot) => {
     const list = [];
     snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+    // Client-side sort by createdAt descending
+    list.sort((a, b) => {
+      const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return timeB - timeA;
+    });
     callback(list);
   }, (err) => console.error('Notifications sync error:', err));
 }
@@ -365,9 +371,12 @@ export async function createFirestoreTask(taskData, creator) {
 }
 
 /**
- * Updates an existing task with audit logging
+ * Updates an existing task with audit logging (or creates it if taskId is missing)
  */
 export async function updateFirestoreTask(taskId, updateData, user) {
+  if (!taskId) {
+    return createFirestoreTask(updateData, user);
+  }
   const timestamp = new Date().toISOString();
   const taskRef = doc(db, TASKS_COL, taskId);
 
