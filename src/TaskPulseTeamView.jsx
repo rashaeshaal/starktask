@@ -3,11 +3,13 @@ import {
   Users, User, CheckCircle2, Clock, AlertTriangle, AlertCircle, 
   ShieldAlert, Calendar, ChevronLeft, ChevronRight, Filter, Search,
   CheckSquare, Square, Eye, Edit3, ArrowRight, TrendingUp, Layers,
-  Building2, Briefcase, UserCheck, Shield, Phone, Mail, Award, Check
+  Building2, Briefcase, UserCheck, Shield, Phone, Mail, Award, Check,
+  PlusCircle, Plus
 } from 'lucide-react';
 import { TASK_STATUSES, TASK_PRIORITIES, isTaskLockedForUser } from './rbac';
 import { getTodayDateString, getDateOffset } from './dateUtils';
 import { getReportees, ROLE_HIERARCHY_LEVELS } from './orgStructure';
+import AddTodayWorkModal from './AddTodayWorkModal';
 
 /**
  * TaskPulseTeamView
@@ -19,8 +21,10 @@ import { getReportees, ROLE_HIERARCHY_LEVELS } from './orgStructure';
  * 3. Individual Employee View (Profile, designation, department, reporting manager, metrics, task list)
  * 4. Daily Task Sheet (Columns: Date, Checkbox, Title, Description, Assignee, Status, Project/Dept, Priority, Deadline, Actions)
  * 5. Date Navigation (Today, Yesterday, Previous dates, Custom Date Picker)
- * 6. Dynamic data from Firestore (Zero hardcoding, real-time metrics, duplicate prevention)
- * 7. Role-Based Visibility (Hierarchy-scoped: Executive/GM -> Dept Heads -> Supervisors -> Staff)
+ * 6. "Add Today's Work" quick logger with immediate row reflection
+ * 7. Clean display of logged-in user's name (no "Tasks assigned to undefined")
+ * 8. Dynamic data from Firestore (Zero hardcoding, real-time metrics, duplicate prevention)
+ * 9. Role-Based Visibility (Hierarchy-scoped: Executive/GM -> Dept Heads -> Supervisors -> Staff)
  */
 export default function TaskPulseTeamView({
   tasks = [],
@@ -46,6 +50,9 @@ export default function TaskPulseTeamView({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+
+  // Modal State: "Add Today's Work"
+  const [isAddTodayWorkModalOpen, setIsAddTodayWorkModalOpen] = useState(false);
 
   // 1. Determine Hierarchy & Authorized Team Scope
   const isExecutiveLeadership = ['Executive Director', 'Director Operations', 'General Manager'].includes(currentUser?.role);
@@ -104,53 +111,37 @@ export default function TaskPulseTeamView({
         pending: 0,
         inProgress: 0,
         overdue: 0,
-        blocked: 0
+        blocked: 0,
+        todayCount: 0
       };
     });
 
-    // Also track for currentUser
-    if (currentUser && !stats[currentUser.id]) {
-      stats[currentUser.id] = {
-        total: 0,
-        completed: 0,
-        pending: 0,
-        inProgress: 0,
-        overdue: 0,
-        blocked: 0
-      };
-    }
-
     tasks.forEach(task => {
-      // Find all assignees for this task
-      const assigneeIds = new Set();
-      if (task.assignedToId) assigneeIds.add(task.assignedToId);
-      if (Array.isArray(task.assigneeIds)) {
-        task.assigneeIds.forEach(id => assigneeIds.add(id));
-      }
-
-      const isCompleted = task.status === TASK_STATUSES.COMPLETED;
-      const isInProgress = task.status === TASK_STATUSES.IN_PROGRESS;
-      const isBlocked = task.status === TASK_STATUSES.BLOCKED;
-      const isOverdue = task.deadlineDate < todayStr && !isCompleted;
-      const isPending = task.status === TASK_STATUSES.ASSIGNED || task.status === TASK_STATUSES.ACCEPTED || task.status === TASK_STATUSES.PENDING_REVIEW;
+      const assigneeIds = Array.isArray(task.assigneeIds) && task.assigneeIds.length > 0 
+        ? task.assigneeIds 
+        : (task.assignedToId || task.assignedTo) ? [task.assignedToId || task.assignedTo] : [];
 
       assigneeIds.forEach(empId => {
         if (stats[empId]) {
           stats[empId].total += 1;
-          if (isCompleted) stats[empId].completed += 1;
-          if (isInProgress) stats[empId].inProgress += 1;
-          if (isBlocked) stats[empId].blocked += 1;
-          if (isOverdue) stats[empId].overdue += 1;
-          if (isPending) stats[empId].pending += 1;
+          const taskDateVal = task.taskDate || task.date;
+          if (taskDateVal === todayStr) stats[empId].todayCount += 1;
+          if (task.status === TASK_STATUSES.COMPLETED) stats[empId].completed += 1;
+          if (task.status === TASK_STATUSES.IN_PROGRESS) stats[empId].inProgress += 1;
+          if (task.status === TASK_STATUSES.BLOCKED) stats[empId].blocked += 1;
+          if (task.deadlineDate < todayStr && task.status !== TASK_STATUSES.COMPLETED) stats[empId].overdue += 1;
+          if (task.status === TASK_STATUSES.ASSIGNED || task.status === TASK_STATUSES.ACCEPTED || task.status === TASK_STATUSES.PENDING_REVIEW) {
+            stats[empId].pending += 1;
+          }
         }
       });
     });
 
     return stats;
-  }, [authorizedEmployees, tasks, currentUser, todayStr]);
+  }, [tasks, authorizedEmployees, todayStr]);
 
-  // Whole Team Consolidated Stats
-  const wholeTeamStats = useMemo(() => {
+  // Overall Team Aggregations
+  const overallTeamMetrics = useMemo(() => {
     let total = 0;
     let completed = 0;
     let pending = 0;
@@ -158,15 +149,16 @@ export default function TaskPulseTeamView({
     let overdue = 0;
     let blocked = 0;
 
-    // Use unique task IDs to ensure tasks assigned to multiple people are NOT double counted in company/team totals
     const countedTaskIds = new Set();
 
     tasks.forEach(task => {
-      const isAssignedToAuthorized = authorizedEmployees.some(emp => 
-        task.assignedToId === emp.id || (task.assigneeIds && task.assigneeIds.includes(emp.id))
+      const isAuthorizedTask = authorizedEmployees.some(emp => 
+        task.assignedToId === emp.id || 
+        task.assignedTo === emp.id || 
+        (Array.isArray(task.assigneeIds) && task.assigneeIds.includes(emp.id))
       );
 
-      if (isAssignedToAuthorized && !countedTaskIds.has(task.id)) {
+      if (isAuthorizedTask && !countedTaskIds.has(task.id)) {
         countedTaskIds.add(task.id);
         total += 1;
         if (task.status === TASK_STATUSES.COMPLETED) completed += 1;
@@ -191,34 +183,43 @@ export default function TaskPulseTeamView({
     return employees.find(e => e.id === activeTab) || null;
   }, [activeTab, currentUser, employees]);
 
+  // Active User Display Name Helper (Avoids "undefined")
+  const currentDisplayName = currentUser?.fullName || currentUser?.name || currentUser?.email || 'You';
+
   // 4. Filter Tasks based on Active Tab, Date Filter, and Search
   const filteredTasks = useMemo(() => {
+    const currentUserId = currentUser?.id || currentUser?.authUid || currentUser?.employeeId;
+
     return tasks.filter(task => {
+      const taskAssigneeId = task.assignedToId || task.assignedTo;
+      const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds : [];
+
       // 1. Tab Scope Filter
       if (activeTab === 'my_tasks') {
-        const isMine = task.assignedToId === currentUser?.id || (task.assigneeIds && task.assigneeIds.includes(currentUser?.id));
+        const isMine = taskAssigneeId === currentUserId || taskAssigneeIds.includes(currentUserId);
         if (!isMine) return false;
       } else if (activeTab === 'whole_team') {
         const isAuthorized = authorizedEmployees.some(emp => 
-          task.assignedToId === emp.id || (task.assigneeIds && task.assigneeIds.includes(emp.id))
+          taskAssigneeId === emp.id || taskAssigneeIds.includes(emp.id)
         );
         if (!isAuthorized) return false;
       } else {
         // Specific Employee
-        const isSelectedEmp = task.assignedToId === activeTab || (task.assigneeIds && task.assigneeIds.includes(activeTab));
+        const isSelectedEmp = taskAssigneeId === activeTab || taskAssigneeIds.includes(activeTab);
         if (!isSelectedEmp) return false;
       }
 
       // 2. Date Filter
+      const taskDateVal = task.date || task.taskDate || task.deadlineDate;
       if (dateFilter === 'today') {
-        const matchesDate = task.taskDate === todayStr || task.deadlineDate === todayStr;
+        const matchesDate = taskDateVal === todayStr || task.deadlineDate === todayStr;
         if (!matchesDate) return false;
       } else if (dateFilter === 'yesterday') {
         const yesterdayStr = getDateOffset(-1);
-        const matchesDate = task.taskDate === yesterdayStr || task.deadlineDate === yesterdayStr;
+        const matchesDate = taskDateVal === yesterdayStr || task.deadlineDate === yesterdayStr;
         if (!matchesDate) return false;
       } else if (dateFilter === 'custom' && selectedDate) {
-        const matchesDate = task.taskDate === selectedDate || task.deadlineDate === selectedDate;
+        const matchesDate = taskDateVal === selectedDate || task.deadlineDate === selectedDate;
         if (!matchesDate) return false;
       }
 
@@ -241,139 +242,184 @@ export default function TaskPulseTeamView({
         const query = searchTerm.toLowerCase();
         const matchTitle = (task.title || '').toLowerCase().includes(query);
         const matchDesc = (task.description || '').toLowerCase().includes(query);
-        const matchAssignee = (task.assignedToName || '').toLowerCase().includes(query);
+        const matchAssignee = (task.assignedEmployee || task.assignedToName || '').toLowerCase().includes(query);
         const matchDealer = (task.dealerName || '').toLowerCase().includes(query);
         const matchId = (task.id || '').toLowerCase().includes(query);
         if (!matchTitle && !matchDesc && !matchAssignee && !matchDealer && !matchId) return false;
       }
 
       return true;
+    }).sort((a, b) => {
+      // Sort: Today's newest first
+      const dateA = a.date || a.taskDate || a.createdAt || '';
+      const dateB = b.date || b.taskDate || b.createdAt || '';
+      return dateB.localeCompare(dateA);
     });
-  }, [tasks, activeTab, currentUser, authorizedEmployees, dateFilter, selectedDate, todayStr, statusFilter, priorityFilter, searchTerm]);
+  }, [tasks, activeTab, currentUser, authorizedEmployees, dateFilter, todayStr, selectedDate, statusFilter, priorityFilter, searchTerm]);
 
-  // Quick Toggle Task Complete Checkbox
-  const handleToggleTaskComplete = async (task, e) => {
+  // Handler for toggle complete directly from table
+  const handleToggleTaskComplete = (task, e) => {
     e.stopPropagation();
     if (!onTaskUpdated) return;
 
     const locked = isTaskLockedForUser(currentUser, task);
     if (locked && !isExecutiveLeadership) {
-      alert("This task is locked and cannot be marked completed.");
+      alert("This task is locked! Tasks from previous dates cannot be modified.");
       return;
     }
 
-    const newStatus = task.status === TASK_STATUSES.COMPLETED ? TASK_STATUSES.IN_PROGRESS : TASK_STATUSES.COMPLETED;
-    const newProgress = newStatus === TASK_STATUSES.COMPLETED ? 100 : (task.progressPercentage || 50);
+    const nextStatus = task.status === TASK_STATUSES.COMPLETED ? TASK_STATUSES.IN_PROGRESS : TASK_STATUSES.COMPLETED;
+    const nextProgress = nextStatus === TASK_STATUSES.COMPLETED ? 100 : 50;
 
-    const updated = {
+    onTaskUpdated({
       ...task,
-      status: newStatus,
-      progressPercentage: newProgress,
-      auditAction: newStatus === TASK_STATUSES.COMPLETED ? 'TASK_COMPLETED' : 'TASK_REOPENED',
-      auditDetails: `Task marked as ${newStatus} from Daily Task Sheet by ${currentUser.fullName || currentUser.name}`
-    };
-
-    onTaskUpdated(updated);
+      status: nextStatus,
+      progressPercentage: nextProgress,
+      auditAction: 'STATUS_TOGGLED',
+      auditDetails: `Task marked as ${nextStatus}`
+    });
   };
 
-  // Helper for rendering employee initials
+  // Helper for Initials
   const getInitials = (name) => {
-    if (!name) return 'EM';
+    if (!name) return 'ST';
     const parts = name.trim().split(' ');
     if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
     return name.slice(0, 2).toUpperCase();
   };
 
   return (
-    <div className="space-y-6">
-      {/* 2. CONTEXTUAL METRIC CARDS: WHOLE TEAM OR INDIVIDUAL EMPLOYEE */}
-      {activeTab === 'whole_team' ? (
-        // WHOLE TEAM DASHBOARD CARD
-        <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-[#05331F] flex items-center justify-center border border-emerald-200 font-bold">
-                <Users className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <span>Whole Team Overview</span>
-                  <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
-                    {authorizedEmployees.length} Active Staff
+    <div className="space-y-6 max-w-7xl mx-auto pb-12 font-sans select-none">
+      
+      {/* 1. HORIZONTAL TEAM MEMBER NAVIGATION TABS */}
+      <div className="bg-white rounded-3xl border border-slate-200/80 p-2 shadow-xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1">
+          
+          {/* Tab 1: My Tasks */}
+          <button
+            onClick={() => setActiveTab('my_tasks')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 ${
+              activeTab === 'my_tasks'
+                ? 'bg-[#05331F] text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <User className="w-3.5 h-3.5 text-emerald-400" />
+            <span>My Tasks</span>
+            {currentUser && employeeTaskStats[currentUser.id]?.total > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                activeTab === 'my_tasks' ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {employeeTaskStats[currentUser.id].total}
+              </span>
+            )}
+          </button>
+
+          {/* Tab 2: Whole Team (Visible if permitted) */}
+          {canViewTeam && (
+            <button
+              onClick={() => setActiveTab('whole_team')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 ${
+                activeTab === 'whole_team'
+                  ? 'bg-[#05331F] text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Whole Team</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                activeTab === 'whole_team' ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {overallTeamMetrics.total}
+              </span>
+            </button>
+          )}
+
+          {/* Divider */}
+          {canViewTeam && authorizedEmployees.length > 0 && (
+            <div className="h-6 w-px bg-slate-200 shrink-0 mx-1" />
+          )}
+
+          {/* Individual Employee Tabs */}
+          {canViewTeam && authorizedEmployees.map(emp => {
+            const isSelf = emp.id === currentUser?.id;
+            const stats = employeeTaskStats[emp.id] || { total: 0, overdue: 0 };
+            const isActive = activeTab === emp.id;
+
+            return (
+              <button
+                key={emp.id}
+                onClick={() => setActiveTab(emp.id)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-2xl text-xs font-semibold transition-all shrink-0 ${
+                  isActive
+                    ? 'bg-[#05331F] text-white font-bold shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-lg flex items-center justify-center text-[10px] font-bold ${
+                  isActive ? 'bg-emerald-900 text-emerald-300' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {getInitials(emp.fullName || emp.name)}
+                </div>
+                <span className="truncate max-w-[120px]">{emp.fullName || emp.name}</span>
+                {isSelf && <span className="text-[9px] text-emerald-400 font-mono">(You)</span>}
+                
+                {stats.total > 0 && (
+                  <span className={`text-[10px] font-mono px-1 rounded ${
+                    isActive ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {stats.total}
                   </span>
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Consolidated performance across all authorized employees and teams
-                </p>
+                )}
+                {stats.overdue > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" title={`${stats.overdue} overdue tasks`} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 2. ACTIVE VIEW DETAILS / METRICS */}
+      {activeTab === 'whole_team' ? (
+        // WHOLE TEAM AGGREGATE SUMMARY
+        <div className="bg-white rounded-3xl border border-slate-200/80 p-5 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-100">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-[#05331F] bg-emerald-50 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                  Operational Workgroup
+                </span>
+                <span className="text-xs text-slate-400 font-mono">• {authorizedEmployees.length} Supervised Members</span>
               </div>
+              <h2 className="text-lg font-bold text-slate-900 mt-1">Whole Team Performance Dashboard</h2>
             </div>
 
-            {/* Quick Overall Progress Bar */}
-            <div className="sm:text-right space-y-1">
-              <div className="text-xs font-bold text-slate-700">
-                Team Completion: <span className="text-emerald-700">{wholeTeamStats.completionRate}%</span>
-              </div>
-              <div className="w-40 bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                <div 
-                  className="bg-[#05331F] h-2 rounded-full transition-all duration-500"
-                  style={{ width: `${wholeTeamStats.completionRate}%` }}
-                />
+            {/* Overall Rate Indicator */}
+            <div className="flex items-center gap-3 self-start sm:self-auto bg-slate-50 px-4 py-2 rounded-2xl border border-slate-200">
+              <TrendingUp className="w-5 h-5 text-emerald-700" />
+              <div>
+                <div className="text-[11px] font-semibold text-slate-500">Team Completion Rate</div>
+                <div className="text-lg font-black font-mono text-[#05331F]">{overallTeamMetrics.completionRate}%</div>
               </div>
             </div>
           </div>
 
-          {/* Key Stat Badges */}
+          {/* Metric Cards Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {[
-              { label: 'Total Assigned', count: wholeTeamStats.total, icon: Layers, color: 'text-slate-900 bg-slate-50 border-slate-200' },
-              { label: 'Completed', count: wholeTeamStats.completed, icon: CheckCircle2, color: 'text-emerald-800 bg-emerald-50 border-emerald-200' },
-              { label: 'In Progress', count: wholeTeamStats.inProgress, icon: Clock, color: 'text-blue-800 bg-blue-50 border-blue-200' },
-              { label: 'Pending Sign-Off', count: wholeTeamStats.pending, icon: CheckSquare, color: 'text-amber-800 bg-amber-50 border-amber-200' },
-              { label: 'Overdue Alerts', count: wholeTeamStats.overdue, icon: AlertTriangle, color: 'text-rose-800 bg-rose-50 border-rose-200' },
-              { label: 'Blocked / Holds', count: wholeTeamStats.blocked, icon: ShieldAlert, color: 'text-purple-800 bg-purple-50 border-purple-200' },
-            ].map((stat, idx) => {
-              const Icon = stat.icon;
-              return (
-                <div key={idx} className={`p-3 rounded-2xl border ${stat.color} flex flex-col justify-between`}>
-                  <div className="flex items-center justify-between text-xs font-semibold text-slate-600 mb-1">
-                    <span>{stat.label}</span>
-                    <Icon className="w-3.5 h-3.5 opacity-70" />
-                  </div>
-                  <div className="text-xl font-bold font-mono text-slate-900">{stat.count}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Employee-wise Completion Percentage Table Preview */}
-          <div className="bg-slate-50/70 rounded-2xl p-3 border border-slate-200/60">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center justify-between">
-              <span>Employee Completion Roster</span>
-              <span className="text-[10px] text-slate-400 font-mono">Live Firestore Feed</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {authorizedEmployees.map(emp => {
-                const s = employeeTaskStats[emp.id] || { total: 0, completed: 0 };
-                const pct = s.total > 0 ? Math.round((s.completed / s.total) * 100) : 0;
-                return (
-                  <div key={emp.id} className="bg-white p-2.5 rounded-xl border border-slate-200 text-xs flex items-center justify-between shadow-2xs">
-                    <div className="flex items-center gap-2 truncate">
-                      <div className="w-6 h-6 rounded-lg bg-emerald-100 text-[#05331F] font-bold flex items-center justify-center text-[10px] shrink-0">
-                        {getInitials(emp.fullName || emp.name)}
-                      </div>
-                      <div className="truncate">
-                        <div className="font-bold text-slate-800 truncate">{emp.fullName || emp.name}</div>
-                        <div className="text-[10px] text-slate-400 truncate">{emp.role}</div>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 ml-2">
-                      <div className="font-mono font-bold text-emerald-800">{s.completed}/{s.total}</div>
-                      <div className="text-[10px] text-slate-400 font-semibold">{pct}%</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+              { label: 'Total Assigned', val: overallTeamMetrics.total, color: 'text-slate-900', bg: 'bg-slate-50 border-slate-200' },
+              { label: 'Completed', val: overallTeamMetrics.completed, color: 'text-emerald-800', bg: 'bg-emerald-50 border-emerald-200' },
+              { label: 'In Progress', val: overallTeamMetrics.inProgress, color: 'text-blue-800', bg: 'bg-blue-50 border-blue-200' },
+              { label: 'Pending Review', val: overallTeamMetrics.pending, color: 'text-amber-800', bg: 'bg-amber-50 border-amber-200' },
+              { label: 'Overdue SLA', val: overallTeamMetrics.overdue, color: 'text-rose-800', bg: 'bg-rose-50 border-rose-200' },
+              { label: 'Blocked Items', val: overallTeamMetrics.blocked, color: 'text-red-900', bg: 'bg-red-50 border-red-200' },
+            ].map((m, idx) => (
+              <div key={idx} className={`p-3.5 rounded-2xl border ${m.bg}`}>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{m.label}</div>
+                <div className={`text-xl font-black font-mono mt-0.5 ${m.color}`}>{m.val}</div>
+              </div>
+            ))}
           </div>
         </div>
       ) : selectedEmployee ? (
@@ -448,16 +494,16 @@ export default function TaskPulseTeamView({
             return (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 {[
-                  { label: "Assigned", count: stats.total, color: 'text-slate-900 bg-slate-50 border-slate-200' },
-                  { label: 'Completed', count: stats.completed, color: 'text-emerald-800 bg-emerald-50 border-emerald-200' },
-                  { label: 'In Progress', count: stats.inProgress, color: 'text-blue-800 bg-blue-50 border-blue-200' },
-                  { label: 'Pending Sign-Off', count: stats.pending, color: 'text-amber-800 bg-amber-50 border-amber-200' },
-                  { label: 'Overdue', count: stats.overdue, color: 'text-rose-800 bg-rose-50 border-rose-200' },
-                  { label: 'Blocked', count: stats.blocked, color: 'text-purple-800 bg-purple-50 border-purple-200' },
-                ].map((s, idx) => (
-                  <div key={idx} className={`p-2.5 rounded-2xl border ${s.color}`}>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">{s.label}</div>
-                    <div className="text-lg font-bold font-mono text-slate-900">{s.count}</div>
+                  { label: "Today's Tasks", val: stats.todayCount || 0, color: 'text-slate-900', bg: 'bg-slate-50 border-slate-200' },
+                  { label: 'Completed', val: stats.completed, color: 'text-emerald-800', bg: 'bg-emerald-50 border-emerald-200' },
+                  { label: 'In Progress', val: stats.inProgress, color: 'text-blue-800', bg: 'bg-blue-50 border-blue-200' },
+                  { label: 'Pending Review', val: stats.pending, color: 'text-amber-800', bg: 'bg-amber-50 border-amber-200' },
+                  { label: 'Overdue SLA', val: stats.overdue, color: 'text-rose-800', bg: 'bg-rose-50 border-rose-200' },
+                  { label: 'Blocked Items', val: stats.blocked, color: 'text-red-900', bg: 'bg-red-50 border-red-200' },
+                ].map((m, idx) => (
+                  <div key={idx} className={`p-3 rounded-2xl border ${m.bg}`}>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{m.label}</div>
+                    <div className={`text-xl font-black font-mono mt-0.5 ${m.color}`}>{m.val}</div>
                   </div>
                 ))}
               </div>
@@ -466,64 +512,78 @@ export default function TaskPulseTeamView({
         </div>
       ) : null}
 
-      {/* 3. DAILY TASK SHEET (Consolidated Professional Table) */}
+      {/* 3. DAILY TASK SHEET TABLE */}
       <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
         
-        {/* Table Header Controls & Date Navigation */}
-        <div className="p-4 sm:p-5 border-b border-slate-200/70 space-y-3">
+        {/* Table Top Header with Date Nav, Add Today's Work Button, Search & Filters */}
+        <div className="p-4 sm:p-5 border-b border-slate-100 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span>Daily Task Sheet</span>
-                <span className="text-xs bg-slate-100 text-slate-700 font-mono font-bold px-2 py-0.5 rounded-full">
-                  {filteredTasks.length} Live Records
+                <span className="text-[11px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-semibold">
+                  {filteredTasks.length} {filteredTasks.length === 1 ? 'task' : 'tasks'}
                 </span>
               </h3>
               <p className="text-xs text-slate-500">
                 {activeTab === 'whole_team' ? 'Consolidated view across all team members' : 
-                 activeTab === 'my_tasks' ? 'Your personal active task assignments' : 
-                 `Tasks assigned to ${selectedEmployee?.fullName || selectedEmployee?.name}`}
+                 activeTab === 'my_tasks' ? `Tasks assigned to ${currentDisplayName}` : 
+                 `Tasks assigned to ${selectedEmployee?.fullName || selectedEmployee?.name || currentDisplayName}`}
               </p>
             </div>
 
-            {/* Date Navigator Ribbon (Today / Yesterday / Custom) */}
-            <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-2xl border border-slate-200/60 self-start sm:self-auto text-xs">
+            {/* Right Controls: Date Navigator Ribbon + Add Today's Work Button */}
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+              
+              {/* PRIMARY ACTION BUTTON: "Add Today's Work" */}
               <button
-                onClick={() => { setDateFilter('today'); setSelectedDate(todayStr); }}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                  dateFilter === 'today' ? 'bg-[#05331F] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
+                onClick={() => setIsAddTodayWorkModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#05331F] hover:bg-[#07472b] active:bg-[#032214] text-white text-xs font-bold transition shadow-2xs cursor-pointer shrink-0"
+                title="Record what you accomplished today"
               >
-                Today
-              </button>
-              <button
-                onClick={() => { setDateFilter('yesterday'); setSelectedDate(getDateOffset(-1)); }}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                  dateFilter === 'yesterday' ? 'bg-[#05331F] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Yesterday
-              </button>
-              <button
-                onClick={() => setDateFilter('all')}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                  dateFilter === 'all' ? 'bg-[#05331F] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                All Dates
+                <PlusCircle className="w-4 h-4 text-emerald-400" />
+                <span>Add Today's Work</span>
               </button>
 
-              <div className="flex items-center gap-1 pl-1 border-l border-slate-300">
-                <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => {
-                    setSelectedDate(e.target.value);
-                    setDateFilter('custom');
-                  }}
-                  className="bg-transparent text-xs text-slate-700 font-mono outline-none cursor-pointer"
-                />
+              {/* Date Navigator Ribbon (Today / Yesterday / All Dates / Custom) */}
+              <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-2xl border border-slate-200/60 text-xs shrink-0">
+                <button
+                  onClick={() => { setDateFilter('today'); setSelectedDate(todayStr); }}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                    dateFilter === 'today' ? 'bg-[#05331F] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => { setDateFilter('yesterday'); setSelectedDate(getDateOffset(-1)); }}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                    dateFilter === 'yesterday' ? 'bg-[#05331F] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Yesterday
+                </button>
+                <button
+                  onClick={() => setDateFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                    dateFilter === 'all' ? 'bg-[#05331F] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All Dates
+                </button>
+
+                <div className="flex items-center gap-1 pl-1 border-l border-slate-300">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => {
+                      setSelectedDate(e.target.value);
+                      setDateFilter('custom');
+                    }}
+                    className="bg-transparent text-xs text-slate-700 font-mono outline-none cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -591,12 +651,21 @@ export default function TaskPulseTeamView({
               {filteredTasks.length === 0 ? (
                 <tr>
                   <td colSpan="10" className="py-12 text-center text-slate-400 font-medium">
-                    <div className="max-w-xs mx-auto space-y-2">
+                    <div className="max-w-xs mx-auto space-y-3">
                       <Clock className="w-8 h-8 mx-auto text-slate-300" />
-                      <p className="font-semibold text-slate-600 text-xs">No matching tasks found</p>
-                      <p className="text-[11px] text-slate-400">
-                        Try adjusting your date filters or click "Assign Task" to create a new task record.
-                      </p>
+                      <div>
+                        <p className="font-semibold text-slate-700 text-xs">No matching tasks found</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          There are no tasks recorded for this filter. You can log what you worked on right now.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setIsAddTodayWorkModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472b] text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Add Today's Work</span>
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -605,6 +674,7 @@ export default function TaskPulseTeamView({
                   const isCompleted = task.status === TASK_STATUSES.COMPLETED;
                   const locked = isTaskLockedForUser(currentUser, task);
                   const isOverdue = task.deadlineDate < todayStr && !isCompleted;
+                  const taskDateDisplay = task.date || task.taskDate || todayStr;
 
                   return (
                     <tr 
@@ -632,13 +702,20 @@ export default function TaskPulseTeamView({
 
                       {/* 2. Date */}
                       <td className="py-3 px-4 align-top font-mono text-[11px] text-slate-500 whitespace-nowrap">
-                        <div className="font-bold text-slate-800">{task.taskDate || todayStr}</div>
-                        <span className="text-[9px] text-slate-400">{task.id}</span>
+                        <div className="font-bold text-slate-800">{taskDateDisplay}</div>
+                        <span className="text-[9px] text-slate-400">{task.id?.slice(0, 10)}</span>
                       </td>
 
                       {/* 3. Task Title */}
                       <td className="py-3 px-4 align-top">
-                        <div className="font-bold text-slate-900 leading-tight">{task.title}</div>
+                        <div className="font-bold text-slate-900 leading-tight flex items-center gap-1.5 flex-wrap">
+                          <span>{task.title}</span>
+                          {task.selfLogged && (
+                            <span className="text-[9px] font-mono bg-emerald-50 text-emerald-800 px-1.5 py-0.2 rounded border border-emerald-200">
+                              Self-Logged
+                            </span>
+                          )}
+                        </div>
                         {task.taskType === 'dealer_call' && task.dealerName && (
                           <div className="text-[11px] text-emerald-800 font-semibold flex items-center gap-1 mt-1">
                             <Building2 className="w-3 h-3 text-emerald-600" />
@@ -668,11 +745,11 @@ export default function TaskPulseTeamView({
                       <td className="py-3 px-4 align-top whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <div className="w-6 h-6 rounded-lg bg-emerald-100 text-[#05331F] font-bold flex items-center justify-center text-[10px] shrink-0">
-                            {getInitials(task.assignedToName)}
+                            {getInitials(task.assignedEmployee || task.assignedToName)}
                           </div>
                           <div>
-                            <div className="font-bold text-slate-800">{task.assignedToName || 'Unassigned'}</div>
-                            <div className="text-[10px] text-slate-400">By: {task.createdByName || 'Manager'}</div>
+                            <div className="font-bold text-slate-800">{task.assignedEmployee || task.assignedToName || 'Unassigned'}</div>
+                            <div className="text-[10px] text-slate-400">By: {task.createdByName || (task.selfLogged ? 'Self' : 'Manager')}</div>
                           </div>
                         </div>
                       </td>
@@ -699,7 +776,7 @@ export default function TaskPulseTeamView({
                       {/* 7. Project / Department */}
                       <td className="py-3 px-4 align-top whitespace-nowrap">
                         <span className="font-mono text-[10px] font-bold uppercase bg-slate-100 px-2 py-0.5 rounded text-slate-700">
-                          {task.departmentId || 'Operations'}
+                          {task.projectDept || task.departmentId || task.department || 'Operations'}
                         </span>
                         {task.targetTeamName && (
                           <div className="text-[9px] text-teal-800 font-semibold mt-0.5">
@@ -722,7 +799,7 @@ export default function TaskPulseTeamView({
                       {/* 9. Deadline */}
                       <td className="py-3 px-4 align-top font-mono text-[11px] whitespace-nowrap">
                         <div className={`${isOverdue ? 'text-rose-600 font-bold' : 'text-slate-600'}`}>
-                          {task.deadlineDate || task.taskDate}
+                          {task.deadlineDate || task.date || task.taskDate}
                         </div>
                         {isOverdue && (
                           <span className="text-[9px] text-rose-700 font-bold uppercase">Overdue</span>
@@ -733,7 +810,7 @@ export default function TaskPulseTeamView({
                       <td className="py-3 px-4 align-top text-center whitespace-nowrap space-y-1">
                         <button
                           onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
-                          className="w-full flex items-center justify-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold bg-emerald-50 text-[#05331F] hover:bg-emerald-100 border border-emerald-200 transition-all"
+                          className="w-full flex items-center justify-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold bg-emerald-50 text-[#05331F] hover:bg-emerald-100 border border-emerald-200 transition-all cursor-pointer"
                         >
                           <Edit3 className="w-3 h-3" />
                           <span>{locked && isExecutiveLeadership ? 'Override' : 'Execute'}</span>
@@ -748,7 +825,20 @@ export default function TaskPulseTeamView({
         </div>
       </div>
 
+      {/* 4. MODAL: ADD TODAY'S WORK */}
+      <AddTodayWorkModal
+        isOpen={isAddTodayWorkModalOpen}
+        onClose={() => setIsAddTodayWorkModalOpen(false)}
+        currentUser={currentUser}
+        departments={departments}
+        onTaskCreated={(newTask) => {
+          // Immediately update parent state so task appears without needing reload
+          if (onTaskUpdated) {
+            onTaskUpdated(newTask);
+          }
+        }}
+      />
+
     </div>
   );
 }
-
