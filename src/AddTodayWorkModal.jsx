@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   PlusCircle, X, Loader2, Calendar, Clock, AlertCircle, 
-  Building2, CheckCircle2, ShieldAlert, Sparkles, Layers 
+  Building2, CheckCircle2 
 } from 'lucide-react';
 import { TASK_STATUSES, TASK_PRIORITIES } from './rbac';
 import { getTodayDateString } from './dateUtils';
@@ -10,23 +10,13 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 /**
  * AddTodayWorkModal
- * Allows employees to log what they accomplished today or add work directly to the Daily Task Sheet.
+ * Allows employees to log what they worked on directly into the Daily Task Sheet.
  * 
- * Fields:
- * - Task Title (required)
- * - Description
- * - Project / Department (defaults to user's department)
- * - Date (defaults to today)
- * - Status (Completed / In Progress / Pending, default: Completed)
- * - Priority (Low / Medium / High, default: Medium)
- * 
- * Rules:
- * - Enforces day-locking: past dates cannot be added or edited by employees.
- * - Keyboard accessible: Esc to close, autofocus on title.
- * - Loading indicator during Firestore write.
- * - Saves with consistent field names (title, description, date, taskDate, deadlineDate, 
- *   assignedTo, assignedToId, assigneeIds, assignedEmployee, assignedToName, 
- *   selfLogged: true, status, priority, departmentId, createdAt).
+ * Updated Requirements:
+ * 1. Project / Department field removed from form (defaults automatically to user's department).
+ * 2. Date is fixed to today's date (defaults to today, read-only / cannot choose past or yesterday).
+ * 3. Self-logged tag/badge removed.
+ * 4. Status defaults to "Pending" (TASK_STATUSES.ASSIGNED), with ability to change to "In Progress" or "Completed".
  */
 export default function AddTodayWorkModal({
   isOpen,
@@ -41,11 +31,7 @@ export default function AddTodayWorkModal({
   // Form states
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [projectDept, setProjectDept] = useState(
-    currentUser?.department || currentUser?.departmentId || 'operations'
-  );
-  const [date, setDate] = useState(todayStr);
-  const [status, setStatus] = useState(TASK_STATUSES.COMPLETED);
+  const [status, setStatus] = useState(TASK_STATUSES.ASSIGNED); // Default: Pending
   const [priority, setPriority] = useState(TASK_PRIORITIES.MEDIUM);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,10 +43,8 @@ export default function AddTodayWorkModal({
       setErrorMessage('');
       setTitle('');
       setDescription('');
-      setDate(todayStr);
-      setStatus(TASK_STATUSES.COMPLETED);
+      setStatus(TASK_STATUSES.ASSIGNED); // Default: Pending
       setPriority(TASK_PRIORITIES.MEDIUM);
-      setProjectDept(currentUser?.department || currentUser?.departmentId || 'operations');
 
       const timer = setTimeout(() => {
         if (titleInputRef.current) {
@@ -80,11 +64,9 @@ export default function AddTodayWorkModal({
         window.removeEventListener('keydown', handleKeyDown);
       };
     }
-  }, [isOpen, todayStr, currentUser, onClose]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
-
-  const isExecutiveLeadership = ['Executive Director', 'Director Operations', 'General Manager'].includes(currentUser?.role);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -95,25 +77,17 @@ export default function AddTodayWorkModal({
       return;
     }
 
-    // Day-Locking Rule: Block adding work for past days unless executive
-    if (date < todayStr && !isExecutiveLeadership) {
-      setErrorMessage("Action Locked: Tasks cannot be logged or edited for past dates. You can only record work for today or upcoming dates.");
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
       const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const currentUserId = currentUser?.id || currentUser?.authUid || currentUser?.employeeId || 'unknown_user';
       const currentUserName = currentUser?.fullName || currentUser?.name || currentUser?.email || 'Employee';
-
-      const resolvedDeptObj = departments.find(d => d.id === projectDept || d.name === projectDept);
-      const deptCode = resolvedDeptObj?.id || projectDept;
+      const userDept = currentUser?.department || currentUser?.departmentId || 'operations';
 
       const progressMap = {
         [TASK_STATUSES.COMPLETED]: 100,
-        [TASK_STATUSES.IN_PROGRESS]: 60,
+        [TASK_STATUSES.IN_PROGRESS]: 50,
         [TASK_STATUSES.ASSIGNED]: 0,
         [TASK_STATUSES.PENDING_REVIEW]: 90
       };
@@ -121,12 +95,12 @@ export default function AddTodayWorkModal({
       const newTaskData = {
         title: title.trim(),
         description: description.trim(),
-        date: date,
-        taskDate: date,
-        deadlineDate: date,
+        date: todayStr,
+        taskDate: todayStr,
+        deadlineDate: todayStr,
         time: timeNow,
         
-        // Assignee mappings for universal compatibility
+        // Assignee mappings
         assignedTo: currentUserId,
         assignedToId: currentUserId,
         assigneeIds: [currentUserId],
@@ -137,33 +111,29 @@ export default function AddTodayWorkModal({
         createdById: currentUserId,
         createdByName: currentUserName,
 
-        // Project / Department
-        projectDept: deptCode,
-        departmentId: deptCode,
-        department: deptCode,
+        // Project / Department (auto-resolved from employee)
+        projectDept: userDept,
+        departmentId: userDept,
+        department: userDept,
 
         // Status & Priority
         status: status,
         priority: priority,
-        progressPercentage: progressMap[status] !== undefined ? progressMap[status] : 100,
-
-        // Special metadata
-        selfLogged: true,
-        isWorkLog: true,
+        progressPercentage: progressMap[status] !== undefined ? progressMap[status] : 0,
 
         // Audit Trail
         auditLogs: [
           {
             id: `log-${Date.now()}`,
-            action: 'SELF_LOGGED_WORK',
+            action: 'CREATED_TASK',
             performedById: currentUserId,
             performedByName: currentUserName,
-            timestamp: `${date} ${timeNow}`,
-            details: `Task recorded as '${status}' (${priority} Priority)`
+            timestamp: `${todayStr} ${timeNow}`,
+            details: `Task recorded with status '${status}' (${priority} Priority)`
           }
         ],
 
-        createdAt: `${date} ${timeNow}`,
+        createdAt: `${todayStr} ${timeNow}`,
         serverTimestamp: serverTimestamp()
       };
 
@@ -178,7 +148,7 @@ export default function AddTodayWorkModal({
 
       onClose();
     } catch (err) {
-      console.error('Error saving today work task to Firestore:', err);
+      console.error('Error saving task to Firestore:', err);
       setErrorMessage(err.message || 'Failed to save task. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -202,10 +172,10 @@ export default function AddTodayWorkModal({
             </div>
             <div>
               <h2 id="modal-title" className="text-sm sm:text-base font-bold text-[#0F172A] tracking-tight">
-                Add Today's Work
+                Add Task
               </h2>
               <p className="text-[11px] text-[#64748B]">
-                Log an activity or task accomplished for the Daily Task Sheet
+                Log work for today's task sheet
               </p>
             </div>
           </div>
@@ -261,46 +231,14 @@ export default function AddTodayWorkModal({
             />
           </div>
 
-          {/* Project / Dept & Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-[#0F172A] mb-1">
-                Project / Dept
-              </label>
-              <select
-                value={projectDept}
-                onChange={(e) => setProjectDept(e.target.value)}
-                className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2.5 text-xs text-[#0F172A] outline-none transition focus:bg-white focus:border-[#05331F] focus:ring-1 focus:ring-[#05331F]"
-              >
-                {departments && departments.length > 0 ? (
-                  departments.map(d => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))
-                ) : (
-                  <>
-                    <option value="operations">Operations</option>
-                    <option value="sales">Sales</option>
-                    <option value="finance">Finance & Accounts</option>
-                    <option value="warehouse">Warehouse</option>
-                    <option value="qc">Quality Control</option>
-                    <option value="hr_admin">HR & Admin</option>
-                    <option value="transportation">Transportation</option>
-                  </>
-                )}
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-semibold text-[#0F172A] mb-1">
-                Date
-              </label>
-              <input
-                type="date"
-                required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2.5 text-xs font-mono font-bold text-[#05331F] outline-none transition focus:bg-white focus:border-[#05331F] focus:ring-1 focus:ring-[#05331F]"
-              />
+          {/* Date Indicator (Fixed to Today - Read Only) */}
+          <div>
+            <label className="block font-semibold text-[#0F172A] mb-1">
+              Date
+            </label>
+            <div className="w-full bg-slate-100/80 border border-[#E2E8F0] rounded-xl px-3.5 py-2 text-xs font-mono font-bold text-slate-700 flex items-center justify-between">
+              <span>{todayStr} (Today)</span>
+              <span className="text-[10px] bg-slate-200/80 text-slate-600 px-2 py-0.5 rounded font-sans font-medium">Locked to Today</span>
             </div>
           </div>
 
@@ -315,9 +253,9 @@ export default function AddTodayWorkModal({
                 onChange={(e) => setStatus(e.target.value)}
                 className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2.5 text-xs font-semibold text-[#0F172A] outline-none transition focus:bg-white focus:border-[#05331F] focus:ring-1 focus:ring-[#05331F]"
               >
-                <option value={TASK_STATUSES.COMPLETED}>Completed</option>
+                <option value={TASK_STATUSES.ASSIGNED}>Pending (Default)</option>
                 <option value={TASK_STATUSES.IN_PROGRESS}>In Progress</option>
-                <option value={TASK_STATUSES.ASSIGNED}>Pending</option>
+                <option value={TASK_STATUSES.COMPLETED}>Completed</option>
               </select>
             </div>
 
@@ -336,14 +274,6 @@ export default function AddTodayWorkModal({
                 <option value={TASK_PRIORITIES.URGENT}>Critical / Urgent</option>
               </select>
             </div>
-          </div>
-
-          {/* Submitter Context Badge */}
-          <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 flex items-center justify-between text-[11px] text-[#64748B]">
-            <span>Logging as: <strong className="text-[#0F172A]">{currentUser?.fullName || currentUser?.name || currentUser?.email || 'Logged-in Staff'}</strong></span>
-            <span className="font-mono text-[10px] text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded font-bold">
-              Self-Logged
-            </span>
           </div>
 
           {/* Modal Footer Actions */}
@@ -380,4 +310,3 @@ export default function AddTodayWorkModal({
     </div>
   );
 }
-

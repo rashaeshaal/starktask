@@ -710,11 +710,6 @@ export default function TaskPulseTeamView({
                       <td className="py-3 px-4 align-top">
                         <div className="font-bold text-slate-900 leading-tight flex items-center gap-1.5 flex-wrap">
                           <span>{task.title}</span>
-                          {task.selfLogged && (
-                            <span className="text-[9px] font-mono bg-emerald-50 text-emerald-800 px-1.5 py-0.2 rounded border border-emerald-200">
-                              Self-Logged
-                            </span>
-                          )}
                         </div>
                         {task.taskType === 'dealer_call' && task.dealerName && (
                           <div className="text-[11px] text-emerald-800 font-semibold flex items-center gap-1 mt-1">
@@ -749,7 +744,9 @@ export default function TaskPulseTeamView({
                           </div>
                           <div>
                             <div className="font-bold text-slate-800">{task.assignedEmployee || task.assignedToName || 'Unassigned'}</div>
-                            <div className="text-[10px] text-slate-400">By: {task.createdByName || (task.selfLogged ? 'Self' : 'Manager')}</div>
+                            {task.createdByName && task.createdByName !== (task.assignedEmployee || task.assignedToName) ? (
+                              <div className="text-[10px] text-slate-400">By: {task.createdByName}</div>
+                            ) : null}
                           </div>
                         </div>
                       </td>
