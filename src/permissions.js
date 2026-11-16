@@ -949,6 +949,11 @@ export function canViewAll(user) {
   return isAllAccessPerformanceRole(user);
 }
 
+export function isGlobalManager(user) {
+  if (!user) return false;
+  return getScope(user) === SCOPES.COMPANY;
+}
+
 export function isGlobalTeamManager(user) {
   if (!user) return false;
   const role = user.role || '';

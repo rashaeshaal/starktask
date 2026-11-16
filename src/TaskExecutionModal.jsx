@@ -300,7 +300,7 @@ export default function TaskExecutionModal({ isOpen, onClose, task, currentUser,
               <Lock className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold">Record is Locked: </span>
-                Historical tasks lock past midnight to ensure operational audit integrity.
+                Tasks lock after 11:59 PM to safeguard operational records and audit integrity. Editing and deletion are disabled.
               </div>
             </div>
           )}
@@ -317,7 +317,7 @@ export default function TaskExecutionModal({ isOpen, onClose, task, currentUser,
           )}
 
           {/* PAYMENT VERIFICATION DEDICATED PANEL FOR FINANCE */}
-          {isFinanceParticipant && isPaymentVerification && (
+          {isFinanceParticipant && isPaymentVerification ? (
             <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 bg-slate-50/50">
               
               {/* Linked Sales Work Summary Card */}

@@ -814,6 +814,7 @@ export default function App() {
               <ReportsView
                 tasks={tasks}
                 employees={employees}
+                currentUser={activeEmployee}
               />
             )}
 

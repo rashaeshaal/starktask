@@ -88,6 +88,10 @@ export default function TaskPulseTeamView({
   const isTransportManager = userRole === 'Transport Manager';
   const isServiceManager = userRole === 'Service Manager';
   const isInventorySupervisor = userRole === 'Inventory Supervisor';
+  const isFinanceRole = (currentUser?.department || '').toLowerCase() === 'finance' ||
+                        ['Accounts Manager', 'Accounts Executive', 'Accountant', 'Junior Accountant'].includes(userRole);
+  const isAccountsManager = userRole === 'Accounts Manager' || userRole === 'Accounts Executive';
+  const isAccountant = userRole === 'Accountant' || userRole === 'Junior Accountant';
 
   const isSupervisorOrManager = isOperationsHead || isWarehouseInCharge || isTransportManager || 
                                 isServiceManager || isInventorySupervisor || userRole.includes('Supervisor') || 
@@ -144,7 +148,7 @@ export default function TaskPulseTeamView({
     }, 3500);
   };
 
-  // 1. Linked tasks from Sales (For Warehouse In-charge & Transport Manager)
+  // 1. Linked tasks from Sales (For Warehouse In-charge, Transport Manager & Finance)
   const salesLinkedTasks = useMemo(() => {
     return tasks.filter(t => {
       const isSalesWork = t.isLinkedSalesWork || t.taskCategory === 'stark_door_order' || Boolean(t.sourceBookingId) || Boolean(t.bookingId);
@@ -152,6 +156,8 @@ export default function TaskPulseTeamView({
         ? (t.departmentId === 'warehouse' || t.department === 'warehouse')
         : isTransportManager
         ? (t.departmentId === 'transportation' || t.department === 'transportation')
+        : isFinanceRole
+        ? (t.departmentId === 'finance' || t.department === 'finance' || t.taskType === 'Payment verification')
         : false;
       return isSalesWork && (isMyDept || isOperationsHead);
     }).sort((a, b) => {
@@ -160,7 +166,7 @@ export default function TaskPulseTeamView({
       const dateB = b.requiredBy || b.deadlineDate || b.createdAt || '';
       return String(dateA).localeCompare(String(dateB));
     });
-  }, [tasks, isWarehouseInCharge, isTransportManager, isOperationsHead]);
+  }, [tasks, isWarehouseInCharge, isTransportManager, isFinanceRole, isOperationsHead]);
 
   // 2. Incoming Cross-Department Requests for Brand Manager
   const marketingRequests = useMemo(() => {
@@ -359,47 +365,111 @@ export default function TaskPulseTeamView({
     }
   };
 
-  const renderStatusBadge = (status) => {
-    const s = status || TASK_STATUSES.ASSIGNED;
+  // Handle Direct Status Change from Dropdown
+  const handleStatusChange = async (task, newStatus, e) => {
+    e?.stopPropagation();
+
+    const locked = isTaskLockedForUser(currentUser, task);
+    if (locked) {
+      showToast('This task is locked and historical records cannot be modified.', 'error');
+      return;
+    }
+
+    if (task.status === newStatus) return;
+
+    const prevStatus = task.status;
+    const prevProgress = task.progressPercentage || 0;
+
+    let nextProgress = prevProgress;
+    if (newStatus === TASK_STATUSES.COMPLETED || newStatus === 'Completed') nextProgress = 100;
+    else if (newStatus === TASK_STATUSES.PENDING_REVIEW || newStatus === 'Pending Review') nextProgress = 90;
+    else if (newStatus === TASK_STATUSES.IN_PROGRESS || newStatus === 'In Progress') nextProgress = Math.max(30, prevProgress);
+    else if (newStatus === TASK_STATUSES.ASSIGNED || newStatus === 'Pending') nextProgress = 0;
+
+    const optimisticTask = {
+      ...task,
+      status: newStatus,
+      progressPercentage: nextProgress
+    };
+
+    if (onTaskUpdated) onTaskUpdated(optimisticTask);
+
+    try {
+      await updateFirestoreTask(task.id, {
+        status: newStatus,
+        progressPercentage: nextProgress,
+        auditAction: 'STATUS_CHANGED',
+        auditDetails: `Status changed from ${prevStatus} to ${newStatus}`
+      }, currentUser);
+      showToast(`Status updated to ${newStatus}`);
+    } catch (err) {
+      console.error('Failed to update task status:', err);
+      if (onTaskUpdated) {
+        onTaskUpdated({
+          ...task,
+          status: prevStatus,
+          progressPercentage: prevProgress
+        });
+      }
+      showToast('Failed to update task status.', 'error');
+    }
+  };
+
+  const renderStatusBadge = (task) => {
+    const s = (typeof task === 'string' ? task : task?.status) || TASK_STATUSES.ASSIGNED;
+    const taskObj = typeof task === 'object' ? task : null;
+    const locked = taskObj ? isTaskLockedForUser(currentUser, taskObj) : false;
+
+    // Badge styling helpers
+    let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
     if (s === TASK_STATUSES.COMPLETED || s === 'Completed') {
+      badgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+    } else if (s === TASK_STATUSES.PENDING_REVIEW || s === 'Pending Review' || s === 'In Review') {
+      badgeClass = 'bg-blue-50 text-blue-800 border-blue-200';
+    } else if (s === 'Correction Requested' || s === 'Changes Requested') {
+      badgeClass = 'bg-amber-50 text-amber-800 border-amber-300';
+    } else if (s === TASK_STATUSES.BLOCKED || s === 'Blocked' || s === 'Payment Hold') {
+      badgeClass = 'bg-rose-50 text-rose-800 border-rose-200';
+    } else if (s === TASK_STATUSES.IN_PROGRESS || s === 'In Progress') {
+      badgeClass = 'bg-sky-50 text-sky-800 border-sky-200';
+    }
+
+    if (!taskObj || locked) {
       return (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-          Completed
+        <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badgeClass}`}>
+          {s === TASK_STATUSES.PENDING_REVIEW ? 'In review' : s === 'Correction Requested' ? 'Changes requested' : s}
         </span>
       );
     }
-    if (s === TASK_STATUSES.PENDING_REVIEW || s === 'In Review') {
-      return (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200">
-          In review
-        </span>
-      );
-    }
-    if (s === 'Correction Requested' || s === 'Changes Requested') {
-      return (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300">
-          Changes requested
-        </span>
-      );
-    }
-    if (s === TASK_STATUSES.BLOCKED || s === 'Blocked') {
-      return (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-800 border border-rose-200">
-          Blocked
-        </span>
-      );
-    }
-    if (s === TASK_STATUSES.IN_PROGRESS || s === 'In Progress') {
-      return (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-800 border border-sky-200">
-          In progress
-        </span>
-      );
-    }
+
     return (
-      <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-        Pending
-      </span>
+      <div 
+        className="relative inline-block" 
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+        }}
+      >
+        <select
+          value={s}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onChange={(e) => handleStatusChange(taskObj, e.target.value, e)}
+          className={`appearance-none text-[11px] font-semibold rounded-full pl-2.5 pr-6 py-1 border cursor-pointer focus:outline-none transition-shadow shadow-2xs ${badgeClass}`}
+        >
+          <option value={TASK_STATUSES.ASSIGNED}>Pending</option>
+          <option value={TASK_STATUSES.IN_PROGRESS}>In Progress</option>
+          <option value={TASK_STATUSES.PENDING_REVIEW}>In Review / Sign-Off</option>
+          <option value={TASK_STATUSES.COMPLETED}>Completed</option>
+          <option value={TASK_STATUSES.BLOCKED}>Blocked</option>
+          <option value="Changes Requested">Changes Requested</option>
+        </select>
+        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] opacity-70">
+          ▼
+        </span>
+      </div>
     );
   };
 
@@ -485,7 +555,7 @@ export default function TaskPulseTeamView({
                   My Work
                 </button>
 
-                {(isWarehouseInCharge || isTransportManager || isOperationsHead) && (
+                {(isWarehouseInCharge || isTransportManager || isOperationsHead || isFinanceRole) && (
                   <button
                     type="button"
                     onClick={() => setViewMode('sales_linked')}
@@ -772,6 +842,11 @@ export default function TaskPulseTeamView({
                             <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5 flex-wrap">
                               {task.reference && <span>Ref: <strong className="text-slate-600">{task.reference}</strong></span>}
                               {task.dealerName && <span>Dealer: <strong className="text-slate-600">{task.dealerName}</strong></span>}
+                              {task.yesterdayLateReason && (
+                                <span className="text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-semibold truncate max-w-[220px]" title={`Late Reason: ${task.yesterdayLateReason}`}>
+                                  Reason: {task.yesterdayLateReason}
+                                </span>
+                              )}
                               {task.photos && task.photos.length > 0 && (
                                 <span className="text-emerald-700 font-bold flex items-center gap-0.5">
                                   <Camera className="w-2.5 h-2.5" />
@@ -810,18 +885,21 @@ export default function TaskPulseTeamView({
                             </span>
                           </td>
 
-                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                            {renderStatusBadge(task.status)}
+                          <td 
+                            className="py-2.5 px-3 align-middle whitespace-nowrap"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {renderStatusBadge(task)}
                           </td>
 
                           {/* Actions */}
                           <td className="py-2.5 px-3 align-middle text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1 relative">
-                              {isSupervisorOrManager && (
+                              {(isSupervisorOrManager || isAccountant) && (
                                 <button
                                   type="button"
                                   onClick={(e) => handleSplitTask(task, e)}
-                                  title="Split task for downline (subtask)"
+                                  title="Split task into subtask"
                                   className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
                                 >
                                   <GitFork className="w-3.5 h-3.5" />
@@ -831,9 +909,10 @@ export default function TaskPulseTeamView({
                               <button
                                 type="button"
                                 onClick={() => onOpenTaskDetails && onOpenTaskDetails(task)}
+                                title={locked ? 'View (Locked)' : 'View & Edit'}
                                 className="p-1.5 rounded-lg text-slate-400 hover:text-[#05331F] hover:bg-slate-100 transition cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
                               >
-                                {isCompleted ? <Check className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
+                                {locked ? <Eye className="w-3.5 h-3.5 text-slate-500" /> : isCompleted ? <Check className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
                               </button>
 
                               <button
@@ -858,26 +937,28 @@ export default function TaskPulseTeamView({
                                     className="w-full px-3 py-1.5 hover:bg-slate-50 text-slate-700 flex items-center gap-2 cursor-pointer"
                                   >
                                     <Eye className="w-3.5 h-3.5 text-slate-400" />
-                                    <span>View & Edit</span>
+                                    <span>{locked ? 'View Details' : 'View & Edit'}</span>
                                   </button>
-                                  {isSupervisorOrManager && (
+                                  {(isSupervisorOrManager || isAccountant) && (
                                     <button
                                       type="button"
                                       onClick={(e) => handleSplitTask(task, e)}
                                       className="w-full px-3 py-1.5 hover:bg-emerald-50 text-[#05331F] flex items-center gap-2 cursor-pointer font-medium"
                                     >
                                       <GitFork className="w-3.5 h-3.5 text-emerald-600" />
-                                      <span>Split for Downline</span>
+                                      <span>Split into Subtask</span>
                                     </button>
                                   )}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleDeleteTask(task, e)}
-                                    className="w-full px-3 py-1.5 hover:bg-rose-50 text-rose-600 flex items-center gap-2 cursor-pointer"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                                    <span>Delete</span>
-                                  </button>
+                                  {!locked && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDeleteTask(task, e)}
+                                      className="w-full px-3 py-1.5 hover:bg-rose-50 text-rose-600 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                      <span>Delete</span>
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -936,13 +1017,21 @@ export default function TaskPulseTeamView({
                           <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1 flex-wrap">
                             {task.reference && <span>Ref: <strong>{task.reference}</strong></span>}
                             {task.location && <span>Loc: <strong>{task.location}</strong></span>}
+                            {task.yesterdayLateReason && (
+                              <span className="text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-semibold truncate max-w-[200px]">
+                                Reason: {task.yesterdayLateReason}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-50 flex-wrap gap-2 pl-10">
+                      <div 
+                        className="flex items-center justify-between text-xs pt-1 border-t border-slate-50 flex-wrap gap-2 pl-10"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {renderStatusBadge(task.status)}
+                          {renderStatusBadge(task)}
                           {renderPriorityBadge(task.priority)}
                         </div>
 
@@ -1029,7 +1118,7 @@ export default function TaskPulseTeamView({
           </div>
         )}
 
-        {/* Modal: "Add Today's Work" */}
+        {/* Modal: "Add Work" (Today or Yesterday) */}
         <AddTodayWorkModal
           isOpen={isAddTodayWorkModalOpen}
           onClose={() => setIsAddTodayWorkModalOpen(false)}
@@ -1037,7 +1126,8 @@ export default function TaskPulseTeamView({
           departments={departments}
           onTaskCreated={(newTask) => {
             if (onTaskCreated) onTaskCreated(newTask);
-            showToast("Today's work added successfully!");
+            const dateLabel = newTask?.taskDate === getDateOffset(-1) ? "Yesterday's" : "Today's";
+            showToast(`${dateLabel} work logged successfully!`);
           }}
         />
 

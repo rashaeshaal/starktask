@@ -30,6 +30,7 @@ export default function EscalationsView({
   const today = new Date().toISOString().split('T')[0];
   const userRole = currentUser?.role || '';
   const isOperationsHead = userRole === 'Operations Head';
+  const isAccountsManager = userRole === 'Accounts Manager' || userRole === 'Accounts Executive';
 
   const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
 
@@ -39,8 +40,13 @@ export default function EscalationsView({
   tasks.forEach(task => {
     const taskDept = (task.departmentId || task.department || 'operations').toLowerCase();
 
-    // If viewer is Operations Head, restrict escalations strictly to Operations branches
-    if (isOperationsHead && !opsDepts.includes(taskDept)) {
+    // If viewer is Operations Head, restrict escalations strictly to Operations branches (plus any payment holds affecting picking)
+    if (isOperationsHead && !opsDepts.includes(taskDept) && task.paymentStatus !== 'Payment Hold' && task.accountsClearance !== 'Payment Hold') {
+      return;
+    }
+
+    // If viewer is Accounts Manager, restrict strictly to Finance Payment Holds & Finance Overdue tasks
+    if (isAccountsManager && taskDept !== 'finance' && taskDept !== 'accounts' && task.paymentStatus !== 'Payment Hold' && task.accountsClearance !== 'Payment Hold') {
       return;
     }
 
@@ -91,8 +97,8 @@ export default function EscalationsView({
       });
     }
 
-    // 3. Payment Holds
-    if (!isOperationsHead && (task.paymentStatus === 'Payment Hold' || task.accountsClearance === 'Payment Hold')) {
+    // 3. Payment Holds (visible to Director Operations, Operations Head, and Accounts Manager)
+    if (task.paymentStatus === 'Payment Hold' || task.accountsClearance === 'Payment Hold') {
       incidentList.push({
         id: `esc-pay-${task.id}`,
         taskId: task.id,
@@ -102,13 +108,13 @@ export default function EscalationsView({
         departmentId: 'finance',
         responsibleEmployee: task.assignedToName || 'Accounts Manager',
         responsibleEmployeeId: task.assignedToId || task.assignedTo,
-        issue: 'PAYMENT HOLD: Warehouse Picking Disallowed',
+        issue: `PAYMENT HOLD: ${task.holdReason || 'Advance token unpaid. Warehouse Picking Disallowed.'}`,
         severity: 'Critical',
         ageDays,
         deadline: `${task.deadlineDate || today} 12:00 PM`,
-        escalationLevel: 'Director Operations',
+        escalationLevel: isAccountsManager ? 'Accounts Manager' : isOperationsHead ? 'Operations Head' : 'Director Operations',
         status: 'Active Escalation',
-        reason: 'Advance token or credit ledger unpaid. Disallow dispatch.',
+        reason: task.holdReason || 'Advance token or credit ledger unpaid. Disallow dispatch.',
         timestamp: task.lastUpdated || task.createdAt
       });
     }
@@ -139,10 +145,16 @@ export default function EscalationsView({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            {isOperationsHead ? 'Operations Escalations & Blockers' : 'Escalations & Bottlenecks'}
+            {isAccountsManager 
+              ? 'Finance Escalations & Payment Holds' 
+              : isOperationsHead 
+              ? 'Operations Escalations & Blockers' 
+              : 'Escalations & Bottlenecks'}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            {isOperationsHead 
+            {isAccountsManager
+              ? 'Real-time tracking of active payment holds and token clearance impediments'
+              : isOperationsHead 
               ? 'Real-time tracking of overdue tasks, loading bottlenecks, and operational impediments across all 4 branches'
               : 'Real-time tracking of overdue tasks, operational bottlenecks, payment holds, and delivery risks'}
           </p>

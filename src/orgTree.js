@@ -298,3 +298,111 @@ export function getDownlineRoles(role) {
 
   return Array.from(downline);
 }
+
+/**
+ * Strict check: Is `targetRole` in the downline of `parentRole`?
+ */
+export function isDownlineRole(parentRole, targetRole) {
+  if (!parentRole || !targetRole) return false;
+  const pNorm = normalizeRole(parentRole);
+  const tNorm = normalizeRole(targetRole);
+
+  if (pNorm === tNorm) return false;
+
+  // Executive leadership has universal downline
+  if (pNorm === 'Executive Director' || pNorm === 'Director Operations' || pNorm === 'General Manager') {
+    return true;
+  }
+
+  const downline = getDownlineRoles(pNorm);
+  return downline.includes(tNorm);
+}
+
+/**
+ * Validates whether a member role can be placed under a leader role in a team
+ * Returns { valid: boolean, reason?: string }
+ */
+export function validateTeamPlacement(leaderRole, memberRole, teamDepartment = null) {
+  if (!leaderRole || !memberRole) {
+    return { valid: false, reason: 'Both leader and member roles are required.' };
+  }
+
+  const lNorm = normalizeRole(leaderRole);
+  const mNorm = normalizeRole(memberRole);
+
+  if (lNorm === mNorm) {
+    return { valid: false, reason: `A ${memberRole} cannot report to themselves or another ${leaderRole}.` };
+  }
+
+  const lNode = ORG_TREE[lNorm];
+  const mNode = ORG_TREE[mNorm];
+
+  if (!lNode) {
+    return { valid: false, reason: `Unknown leader role "${leaderRole}".` };
+  }
+  if (!mNode) {
+    return { valid: false, reason: `Unknown member role "${memberRole}".` };
+  }
+
+  // Member must be at a lower level (higher number)
+  if (mNode.level <= lNode.level) {
+    return { 
+      valid: false, 
+      reason: `A ${memberRole} (Level ${mNode.level}) cannot report to or be placed under a ${leaderRole} (Level ${lNode.level}).` 
+    };
+  }
+
+  // Must be in downline
+  const downline = getDownlineRoles(lNorm);
+  if (!downline.includes(mNorm)) {
+    return { 
+      valid: false, 
+      reason: `Invalid hierarchy placement: A ${memberRole} does not report under a ${leaderRole} in the company structure.` 
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Roles allowed to act as Leader for a given department
+ */
+export function getAllowedLeadersForDepartment(deptId) {
+  if (!deptId) return [];
+  const normalizedDept = deptId.toLowerCase();
+
+  const matching = Object.entries(ORG_TREE)
+    .filter(([role, config]) => {
+      // Management roles can lead any team
+      if (config.department === 'management') return true;
+
+      // Operations head can lead operations, warehouse, transportation, service, inventory, qc
+      if (role === 'Operations Head' && ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'].includes(normalizedDept)) {
+        return true;
+      }
+
+      // Department match and level <= 4 (must be a manager/supervisor role, not frontline staff)
+      const isDept = config.department === normalizedDept || 
+                     (normalizedDept === 'hr_admin' && (config.department === 'hr_admin' || config.department === 'hr')) ||
+                     (normalizedDept === 'operations' && ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'].includes(config.department));
+      
+      return isDept && config.level <= 4 && (config.children || []).length > 0;
+    })
+    .map(([role]) => role);
+
+  return matching;
+}
+
+/**
+ * Get parent role for a given role (reportsTo role)
+ */
+export function getParentRole(role) {
+  const norm = normalizeRole(role);
+  for (const [pRole, config] of Object.entries(ORG_TREE)) {
+    if (config.children && config.children.includes(norm)) {
+      return pRole;
+    }
+  }
+  return null;
+}
+

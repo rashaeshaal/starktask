@@ -187,26 +187,45 @@ export function canApproveTask(user, task) {
 
 /**
  * Strict Day-Locking Rule for SOP & Company Tasks:
+ * Tasks created for previous dates (< today) or past midnight (23:59) are strictly locked.
+ * Completed tasks are locked for regular editing.
+ * Only Executive Director, Director Operations, or General Manager can override/unlock.
  */
 export function isTaskLockedForUser(user, task) {
   if (!task) return false;
 
   // Executive Director, Director Operations, or General Manager can override/unlock
-  if (user?.role === 'Executive Director' || user?.role === 'Director Operations' || user?.role === 'General Manager') {
+  const userRole = user?.role || '';
+  if (userRole === 'Executive Director' || userRole === 'Director Operations' || userRole === 'General Manager') {
     return false;
   }
 
-  const today = new Date().toISOString().split('T')[0];
-  const taskDate = task.taskDate || task.dueDate || task.deadlineDate;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const today = `${year}-${month}-${day}`;
 
-  // Any task created for previous dates (before today) is strictly locked
-  if (taskDate && taskDate < today) {
+  const taskDate = task.taskDate || task.date || task.dueDate || task.deadlineDate;
+
+  // 1. Any task with a date before today is strictly locked
+  if (taskDate && String(taskDate).split('T')[0] < today) {
     return true;
   }
 
-  // Completed or Cancelled tasks are locked for regular editing
-  if (task.status === TASK_STATUSES.COMPLETED) {
+  // 2. Completed or Cancelled tasks are locked for regular editing
+  if (task.status === TASK_STATUSES.COMPLETED || task.status === 'Completed' || task.status === TASK_STATUSES.CANCELLED) {
     return true;
+  }
+
+  // 3. For tasks of today: lock if time has passed 23:59:00
+  if (taskDate && String(taskDate).split('T')[0] === today) {
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    // 23:59 (11:59 PM) or later
+    if (hours === 23 && minutes >= 59) {
+      return true;
+    }
   }
 
   return false;

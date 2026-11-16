@@ -233,6 +233,28 @@ export const TEST_PERSONAS = [
     expectedScope: SCOPES.SELF,
     allowed: ['Dashboard (My Tasks Today)', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
     forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers', 'Bookings']
+  },
+  {
+    id: 'emp_106',
+    uid: 'emp_106',
+    fullName: 'SREEKUMAR E R',
+    email: 'sreekumar@starkdoors.com',
+    role: 'Accounts Manager',
+    department: 'finance',
+    expectedScope: SCOPES.DEPARTMENT,
+    allowed: ['Dashboard (Finance Squad)', 'Payment Verification Queue', 'Team Performance (Finance Only)', 'All Tasks (Finance)', 'Approvals', 'Escalations (Payment Holds)', 'Reports (Finance)'],
+    forbidden: ['Dealers', 'Bookings', 'Operations Tasks outside Finance', 'Cross-Dept Assignment outside Finance']
+  },
+  {
+    id: 'emp_107',
+    uid: 'emp_107',
+    fullName: 'AGINSHA K A',
+    email: 'aginsha@starkdoors.com',
+    role: 'Accountant',
+    department: 'finance',
+    expectedScope: SCOPES.SELF,
+    allowed: ['Dashboard (Payment Verification Queue & Today)', 'Cleared / Payment Hold Actions', 'Split Subtask for Self', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
+    forbidden: ['Assign Button', 'Approvals Queue', 'Team Performance', 'Dealers', 'Bookings', 'Reports']
   }
 ];
 

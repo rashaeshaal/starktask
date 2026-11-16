@@ -5,7 +5,7 @@ import {
   MapPin, Camera, CheckSquare, CreditCard, DollarSign
 } from 'lucide-react';
 import { TASK_STATUSES, TASK_PRIORITIES } from './rbac';
-import { getTodayDateString } from './dateUtils';
+import { getTodayDateString, getDateOffset } from './dateUtils';
 import { db } from './firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import { uploadTaskAttachment } from './firestoreService';
@@ -50,6 +50,7 @@ export default function AddTodayWorkModal({
   onTaskCreated
 }) {
   const todayStr = getTodayDateString();
+  const yesterdayStr = getDateOffset(-1);
   const titleInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const photoInputRef = useRef(null);
@@ -79,6 +80,8 @@ export default function AddTodayWorkModal({
   const scopedDealers = isSales ? filterDealersByScope(dealers, currentUser) : [];
 
   // Form states
+  const [selectedTaskDate, setSelectedTaskDate] = useState(todayStr);
+  const [yesterdayLateReason, setYesterdayLateReason] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState(TASK_STATUSES.ASSIGNED);
@@ -116,6 +119,8 @@ export default function AddTodayWorkModal({
 
   useEffect(() => {
     if (isOpen) {
+      setSelectedTaskDate(todayStr);
+      setYesterdayLateReason('');
       setTitle('');
       setDescription('');
       setStatus(TASK_STATUSES.ASSIGNED);
@@ -244,6 +249,11 @@ export default function AddTodayWorkModal({
       return;
     }
 
+    if (selectedTaskDate === yesterdayStr && !yesterdayLateReason.trim()) {
+      setErrorMessage("Mandatory: Please provide a reason why yesterday's work was not logged yesterday.");
+      return;
+    }
+
     setIsSubmitting(true);
     const timestamp = new Date().toISOString();
 
@@ -255,6 +265,7 @@ export default function AddTodayWorkModal({
     };
 
     const finalDept = userDept || (isFinance ? 'finance' : isMarketing ? 'marketing' : 'operations');
+    const effectiveDate = selectedTaskDate || todayStr;
 
     const newTask = {
       title: title.trim(),
@@ -263,8 +274,9 @@ export default function AddTodayWorkModal({
       priority: priority,
       progressPercentage: progressMap[status] !== undefined ? progressMap[status] : 0,
 
-      taskDate: todayStr,
-      deadlineDate: todayStr,
+      taskDate: effectiveDate,
+      date: effectiveDate,
+      deadlineDate: effectiveDate,
       deadlineTime: '18:00',
       createdAt: timestamp,
       lastUpdated: timestamp,
@@ -281,6 +293,8 @@ export default function AddTodayWorkModal({
       createdByRole: currentUser?.role || 'Staff',
 
       selfLogged: true,
+      isYesterdayLateSubmission: effectiveDate === yesterdayStr,
+      yesterdayLateReason: effectiveDate === yesterdayStr ? yesterdayLateReason.trim() : null,
 
       // Finance fields
       taskType: isFinance ? financeTaskType : isOperations ? opTaskType : isMarketing ? taskType : null,
@@ -339,7 +353,9 @@ export default function AddTodayWorkModal({
                 <PlusCircle className="w-5 h-5 text-emerald-700" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-slate-900">Add Today's Work</h2>
+                <h2 className="text-base font-bold text-slate-900">
+                  {selectedTaskDate === yesterdayStr ? "Add Yesterday's Work" : "Add Today's Work"}
+                </h2>
                 <p className="text-xs text-slate-500">
                   Logging work for: <span className="font-semibold text-slate-800">{currentUser?.fullName || currentUser?.name}</span>
                 </p>
@@ -363,15 +379,64 @@ export default function AddTodayWorkModal({
               </div>
             )}
 
-            {/* Date Indicator */}
-            <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200">
-              <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                <span>Task Date</span>
-              </span>
-              <span className="font-bold text-slate-900 bg-white px-2.5 py-1 rounded-xl border border-slate-200">
-                Today ({todayStr})
-              </span>
+            {/* Date Selector: Today vs Yesterday */}
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-700 flex items-center gap-1.5 text-xs">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Logging Work For Date</span>
+                </span>
+                <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                  {selectedTaskDate === todayStr ? 'Today' : 'Yesterday'} ({selectedTaskDate})
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTaskDate(todayStr)}
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition min-h-[40px] cursor-pointer ${
+                    selectedTaskDate === todayStr
+                      ? 'bg-[#05331F] text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <CheckCircle2 className={`w-3.5 h-3.5 ${selectedTaskDate === todayStr ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <span>Today ({todayStr})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTaskDate(yesterdayStr)}
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition min-h-[40px] cursor-pointer ${
+                    selectedTaskDate === yesterdayStr
+                      ? 'bg-[#05331F] text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Clock className={`w-3.5 h-3.5 ${selectedTaskDate === yesterdayStr ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <span>Yesterday ({yesterdayStr})</span>
+                </button>
+              </div>
+              {selectedTaskDate === yesterdayStr && (
+                <div className="space-y-2 pt-1">
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 space-y-1">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-900">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>Late Yesterday Submission Reason (Mandatory) *</span>
+                    </div>
+                    <p className="text-[10px] text-amber-700">
+                      Standard operating rule requires daily tasks to be submitted before 11:59 PM. Please state why yesterday's work was not logged on time.
+                    </p>
+                    <textarea
+                      rows="2"
+                      required
+                      placeholder="Specify reason for late submission (e.g., Power cut, field travel without network, emergency maintenance)..."
+                      value={yesterdayLateReason}
+                      onChange={(e) => setYesterdayLateReason(e.target.value)}
+                      className="w-full mt-1.5 p-2 bg-white border border-amber-300 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* FINANCE & ACCOUNTS SPECIFIC FIELDS */}
@@ -711,7 +776,11 @@ export default function AddTodayWorkModal({
                 disabled={isSubmitting || isPhotoUploading || isUploading || isFinanceUploading}
                 className="px-5 py-2.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white font-semibold shadow-xs transition disabled:opacity-50 min-h-[44px]"
               >
-                {isSubmitting ? 'Saving...' : "Add Today's Work"}
+                {isSubmitting 
+                  ? 'Saving...' 
+                  : selectedTaskDate === yesterdayStr 
+                  ? "Add Yesterday's Work" 
+                  : "Add Today's Work"}
               </button>
             </div>
           </form>
