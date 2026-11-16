@@ -39,6 +39,7 @@ import SopTemplatesView from './SopTemplatesView';
 import EscalationsView from './EscalationsView';
 import TodoReminderView from './TodoReminderView';
 import DealersDirectoryView from './DealersDirectoryView';
+import PwaInstallPrompt from './PwaInstallPrompt';
 
 export default function App() {
   const { currentUser, userProfile, loading: authLoading, logout } = useAuth();
@@ -266,6 +267,9 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* PWA Install Button (Desktop & Mobile, hides when already installed) */}
+              <PwaInstallPrompt />
+
               {/* Notifications */}
               <div className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer">
                 <Bell className="w-4 h-4" />
