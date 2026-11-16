@@ -80,12 +80,34 @@ export function canViewTask(user, task, allUsers = []) {
 export function canApproveTask(user, task) {
   if (!user || !task) return false;
 
-  if (user.role === 'Executive Director' || user.role === 'Director Operations' || user.role === 'General Manager') {
+  const role = user.role || '';
+  if (role === 'Executive Director' || role === 'Director Operations' || role === 'General Manager') {
     return true;
   }
 
-  if (task.approvalManagerId === user.id || task.createdById === user.id) {
+  const userId = String(user.id || user.uid || user.employeeId || '');
+  const approvalMgr = String(task.approvalManagerId || '');
+  const creator = String(task.createdById || task.createdBy || '');
+  const assigned = String(task.assignedToId || task.assignedTo || '');
+
+  // Direct creator or explicitly designated approval manager
+  if (approvalMgr === userId || creator === userId) {
     return true;
+  }
+
+  // Brand Manager can review any task in the Marketing department
+  if (role === 'Brand Manager') {
+    const tDept = (task.departmentId || task.department || '').toLowerCase();
+    if (tDept === 'marketing') return true;
+  }
+
+  // Leads Coordinator can review tasks assigned to Graphic Designer or Photographer
+  if (role === 'Leads Coordinator') {
+    const tDept = (task.departmentId || task.department || '').toLowerCase();
+    const tRole = task.assignedToRole || '';
+    if (tDept === 'marketing' && (tRole === 'Graphic Designer' || tRole === 'Photographer' || creator === userId)) {
+      return true;
+    }
   }
 
   return false;

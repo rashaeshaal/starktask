@@ -103,11 +103,41 @@ export const ENTERPRISE_EMPLOYEE_DIRECTORY = [
     role: 'Graphic Designer',
     department: 'marketing',
     employeeId: '155',
-    reportingManagerId: '104',
-    reportingManagerName: 'SHAHEEN NAZAR (HR & Admin Manager)',
+    reportingManagerId: '180',
+    reportingManagerName: 'SHARANYA V M (Leads Coordinator)',
     employmentStatus: 'active',
     joiningDate: '2026-04-26',
     phone: '+91 99000 00155',
+    permissions: ['view_own_tasks', 'update_own_tasks', 'submit_tasks']
+  },
+  {
+    email: 'brand.manager@starkdoors.com',
+    fullName: 'Brand Manager',
+    role: 'Brand Manager',
+    department: 'marketing',
+    employeeId: '109',
+    reportingManagerId: '100',
+    reportingManagerName: 'Executive Director',
+    employmentStatus: 'active',
+    joiningDate: '2024-01-15',
+    phone: '+91 99000 00109',
+    permissions: [
+      'view_own_tasks', 'view_team_tasks', 'view_department_tasks', 'create_tasks',
+      'assign_tasks', 'reassign_tasks', 'update_own_tasks', 'submit_tasks',
+      'review_tasks', 'approve_tasks', 'view_reports'
+    ]
+  },
+  {
+    email: 'photographer@starkdoors.com',
+    fullName: 'Stark Photographer',
+    role: 'Photographer',
+    department: 'marketing',
+    employeeId: '156',
+    reportingManagerId: '180',
+    reportingManagerName: 'SHARANYA V M (Leads Coordinator)',
+    employmentStatus: 'active',
+    joiningDate: '2026-05-01',
+    phone: '+91 99000 00156',
     permissions: ['view_own_tasks', 'update_own_tasks', 'submit_tasks']
   },
   {
@@ -142,12 +172,12 @@ export const ENTERPRISE_EMPLOYEE_DIRECTORY = [
     role: 'Leads Coordinator',
     department: 'marketing',
     employeeId: '180',
-    reportingManagerId: '113',
-    reportingManagerName: 'AKHIL K R (Operations Head)',
+    reportingManagerId: '109',
+    reportingManagerName: 'Brand Manager',
     employmentStatus: 'active',
     joiningDate: '2026-08-26',
     phone: '+91 99000 00180',
-    permissions: ['view_own_tasks', 'update_own_tasks', 'submit_tasks']
+    permissions: ['view_own_tasks', 'view_team_tasks', 'create_tasks', 'assign_tasks', 'update_own_tasks', 'submit_tasks', 'approve_tasks']
   },
 
   // 3. Accounts & Finance

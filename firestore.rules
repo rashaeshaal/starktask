@@ -140,6 +140,7 @@ service cloud.firestore {
         isCSO() ||
         resource.data.assignedToId == request.auth.uid ||
         resource.data.createdById == request.auth.uid ||
+        resource.data.requestedBy.id == request.auth.uid ||
         (getUserData().department == resource.data.departmentId && isDepartmentHead(resource.data.departmentId)) ||
         isDownlineMember(resource.data.assignedToId)
       );
@@ -149,7 +150,9 @@ service cloud.firestore {
         isCSO() ||
         request.resource.data.createdById == request.auth.uid ||
         request.resource.data.assignedToId == request.auth.uid ||
-        isDownlineMember(request.resource.data.assignedToId)
+        isDownlineMember(request.resource.data.assignedToId) ||
+        // Allow cross-department requests directed to Marketing / Brand Manager
+        (request.resource.data.departmentId == 'marketing' && request.resource.data.isMarketingRequest == true)
       );
       
       // Updates (subtask completion, status change, approvals)

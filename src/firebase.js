@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getStorage } from "firebase/storage";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
@@ -18,9 +19,10 @@ export const firebaseConfig = {
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Cloud Firestore, Authentication, and Functions
+// Initialize Cloud Firestore, Authentication, Storage, and Functions
 export const db = getFirestore(app);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 export const functions = getFunctions(app);
 
 // Callable Cloud Function triggers

@@ -2,7 +2,8 @@ import {
   collection, doc, getDocs, getDoc, setDoc, addDoc, updateDoc, deleteDoc, 
   onSnapshot, query, where, orderBy, serverTimestamp, writeBatch 
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { db, storage } from './firebase';
 import { MASTER_DEPARTMENTS, MASTER_DESIGNATIONS } from './orgStructure';
 import { getTodayDateString } from './dateUtils';
 import { STARK_DEALER_DIRECTORY } from './dealerDirectory';

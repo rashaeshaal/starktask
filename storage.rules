@@ -1,0 +1,42 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Attachments uploaded for tasks
+    // Allowed file types: images, PDFs, videos up to 25 MB
+    match /taskAttachments/{taskId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+                   && request.resource.size <= 25 * 1024 * 1024
+                   && (
+                     request.resource.contentType.matches('image/.*')
+                     || request.resource.contentType == 'application/pdf'
+                     || request.resource.contentType.matches('video/.*')
+                   );
+      allow delete: if isAuthenticated();
+    }
+
+    // General attachments / marketing deliverables
+    match /marketing/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+                   && request.resource.size <= 25 * 1024 * 1024
+                   && (
+                     request.resource.contentType.matches('image/.*')
+                     || request.resource.contentType == 'application/pdf'
+                     || request.resource.contentType.matches('video/.*')
+                   );
+      allow delete: if isAuthenticated();
+    }
+
+    // Default rule for other authenticated uploads
+    match /{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.resource.size <= 25 * 1024 * 1024;
+    }
+  }
+}

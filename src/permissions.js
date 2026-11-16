@@ -259,8 +259,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     performanceScope: SCOPES.DEPARTMENT,
     menu: [
       PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
-      PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.REPORTS
+      PAGES.APPROVALS, PAGES.TODOS, PAGES.TEAMS, PAGES.REPORTS
     ],
     canAssign: true,
     canApprove: true,
@@ -393,6 +392,18 @@ export const ROLE_PERMISSIONS_CONFIG = {
     canManageEmployees: false
   },
   'Service Coordinator': {
+    scope: SCOPES.DOWNLINE,
+    performanceScope: SCOPES.DOWNLINE,
+    menu: [
+      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.TODOS, PAGES.TEAMS
+    ],
+    canAssign: true,
+    canApprove: true,
+    canManageTeams: false,
+    canManageEmployees: false
+  },
+  'Leads Coordinator': {
     scope: SCOPES.DOWNLINE,
     performanceScope: SCOPES.DOWNLINE,
     menu: [
@@ -658,6 +669,19 @@ export function getVisibleUserIds(user, allEmployees = []) {
       return ids;
     }
 
+    // Brand Manager sees all Marketing roles: Leads Coordinator, Graphic Designer, Photographer
+    if (userRole === 'Brand Manager') {
+      const mktRoles = ['Brand Manager', 'Leads Coordinator', 'Graphic Designer', 'Photographer'];
+      const mktEmployees = allEmployees.filter(e => {
+        const d = (e.department || e.departmentId || '').toLowerCase();
+        const r = normalizeRoleName(e.role || e.designation || '');
+        return d === 'marketing' || mktRoles.includes(r);
+      });
+      const ids = mktEmployees.map(e => String(e.id || e.uid || e.employeeId));
+      if (myId && !ids.includes(myId)) ids.push(myId);
+      return ids;
+    }
+
     const deptEmployees = allEmployees.filter(e => {
       const eDept = (e.department || e.departmentId || '').toLowerCase();
       return eDept === userDept;
@@ -669,6 +693,23 @@ export function getVisibleUserIds(user, allEmployees = []) {
 
   // 3. Downline Scope: Recursive tree downline based on reportsTo / reportingManagerId
   if (scope === SCOPES.DOWNLINE) {
+    const userRole = normalizeRoleName(user.role || '');
+
+    // Leads Coordinator sees self + Graphic Designer and Photographer
+    if (userRole === 'Leads Coordinator') {
+      const allowedRoles = ['Leads Coordinator', 'Graphic Designer', 'Photographer'];
+      const ids = new Set([myId]);
+      allEmployees.forEach(e => {
+        const eId = String(e.id || e.uid || e.employeeId);
+        const r = normalizeRoleName(e.role || e.designation || '');
+        const d = (e.department || e.departmentId || '').toLowerCase();
+        if ((d === 'marketing' || allowedRoles.includes(r)) && allowedRoles.includes(r)) {
+          ids.add(eId);
+        }
+      });
+      return Array.from(ids);
+    }
+
     const downlineIds = new Set([myId]);
     
     if (Array.isArray(user.downline)) {
@@ -726,6 +767,16 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
       });
     }
 
+    // Brand Manager sees all Marketing roles in Team Performance
+    if (userRole === 'Brand Manager') {
+      const mktRoles = ['Brand Manager', 'Leads Coordinator', 'Graphic Designer', 'Photographer'];
+      return allEmployees.filter(e => {
+        const d = (e.department || e.departmentId || '').toLowerCase();
+        const r = normalizeRoleName(e.role || e.designation || '');
+        return d === 'marketing' || mktRoles.includes(r);
+      });
+    }
+
     // HR Manager / Admin Manager sees their HR branch downline
     if (userRole === 'HR Manager' || userRole === 'Admin Manager' || userRole === 'HR & Admin Manager') {
       const hrBranchRoles = ['Admin Manager', 'HR Executive', 'Admin Executive', 'IT Head', 'Housekeeping', 'Housekeeper'];
@@ -750,6 +801,19 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
 
   // 3. Downline Scope -> Self + recursive downline tree
   if (perfScope === SCOPES.DOWNLINE) {
+    const userRole = normalizeRoleName(user.role || '');
+
+    // Leads Coordinator sees self + Graphic Designer and Photographer
+    if (userRole === 'Leads Coordinator') {
+      const allowedRoles = ['Leads Coordinator', 'Graphic Designer', 'Photographer'];
+      return allEmployees.filter(e => {
+        const eId = String(e.id || e.uid || e.employeeId);
+        const r = normalizeRoleName(e.role || e.designation || '');
+        const d = (e.department || e.departmentId || '').toLowerCase();
+        return eId === myId || ((d === 'marketing' || allowedRoles.includes(r)) && allowedRoles.includes(r));
+      });
+    }
+
     const downlineIds = new Set([myId]);
     if (Array.isArray(user.downline)) {
       user.downline.forEach(id => downlineIds.add(String(id)));

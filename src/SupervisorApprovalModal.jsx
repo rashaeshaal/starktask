@@ -21,23 +21,28 @@ export default function SupervisorApprovalModal({ isOpen, onClose, task, current
     const timestamp = `${todayStr} ${new Date().toLocaleTimeString()}`;
     const newStatus = decision === 'approve' ? TASK_STATUSES.COMPLETED : TASK_STATUSES.CORRECTION_REQUESTED;
 
+    const currentRev = Number(task.revision || 1);
+    const newRev = decision === 'reject' ? currentRev + 1 : currentRev;
+
     const auditLog = {
       id: `log-${Date.now()}`,
-      action: decision === 'approve' ? 'APPROVED' : 'CORRECTION_REQUESTED',
-      performedById: currentUser.id,
-      performedByName: `${currentUser.name} (${currentUser.role})`,
+      action: decision === 'approve' ? 'APPROVED' : 'CHANGES_REQUESTED',
+      performedById: currentUser.id || currentUser.uid,
+      performedByName: `${currentUser.fullName || currentUser.name} (${currentUser.role})`,
       timestamp,
       details: decision === 'approve' 
         ? `Task approved by supervisor. Remarks: ${remarks || 'Approved without additional notes.'}`
-        : `Task returned for corrections. Mandatory Reason: ${remarks}`
+        : `Changes requested (Revision ${newRev}). Reason: ${remarks}`
     };
 
     const updatedTask = {
       ...task,
       status: newStatus,
-      progressPercentage: decision === 'approve' ? 100 : task.progressPercentage,
+      progressPercentage: decision === 'approve' ? 100 : (task.progressPercentage || 50),
       approvalRemarks: remarks,
       rejectionReason: decision === 'reject' ? remarks : '',
+      revision: newRev,
+      lastChangeRequestedComment: decision === 'reject' ? remarks : (task.lastChangeRequestedComment || null),
       lastUpdated: timestamp,
       auditLogs: [auditLog, ...(task.auditLogs || [])]
     };
@@ -76,6 +81,52 @@ export default function SupervisorApprovalModal({ isOpen, onClose, task, current
             <span className="font-semibold">Assignee:</span>
             <span>{task.assignedToName}</span>
           </div>
+          {task.revision && Number(task.revision) > 1 && (
+            <div className="flex justify-between text-slate-600">
+              <span className="font-semibold">Current Revision:</span>
+              <span className="font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                Revision {task.revision}
+              </span>
+            </div>
+          )}
+          {task.deliverableUrl && (
+            <div className="flex justify-between items-center text-slate-600 pt-1">
+              <span className="font-semibold">Deliverable Link:</span>
+              <a 
+                href={task.deliverableUrl} 
+                target="_blank" 
+                rel="noreferrer"
+                className="text-[#05331F] font-bold underline truncate max-w-[200px]"
+              >
+                {task.deliverableUrl}
+              </a>
+            </div>
+          )}
+          {Array.isArray(task.attachments) && task.attachments.length > 0 && (
+            <div className="pt-2 border-t border-slate-200 space-y-1.5">
+              <span className="font-semibold text-slate-900">Attached Deliverables ({task.attachments.length}):</span>
+              <div className="grid grid-cols-2 gap-2">
+                {task.attachments.map((att, idx) => (
+                  <a
+                    key={idx}
+                    href={att.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-2 p-2 rounded-xl bg-white border border-slate-200 hover:border-emerald-300 transition"
+                  >
+                    {att.type?.startsWith('image/') ? (
+                      <img src={att.url} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
+                    ) : (
+                      <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center font-bold text-[10px] text-slate-600 shrink-0">
+                        {att.name?.split('.').pop()?.toUpperCase() || 'FILE'}
+                      </div>
+                    )}
+                    <span className="truncate text-[11px] font-medium text-slate-800">{att.name || 'Attachment'}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex justify-between text-slate-600">
             <span className="font-semibold">Expected Deliverable:</span>
             <span className="text-right max-w-xs text-slate-800">{task.expectedResult || 'Deliverables as per instructions'}</span>
