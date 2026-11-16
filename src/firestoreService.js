@@ -500,6 +500,97 @@ export async function createDealerBookingWithChain(bookingData, user) {
 }
 
 /**
+ * --- TEAM MANAGEMENT MODULE FIRESTORE SERVICES ---
+ */
+
+// Create a new Team
+export async function createTeam(teamData, creatorUser) {
+  const teamRef = doc(collection(db, TEAMS_COL));
+  const todayStr = getTodayDateString();
+  const timeNow = new Date().toLocaleTimeString();
+
+  const payload = {
+    ...teamData,
+    id: teamRef.id,
+    createdById: creatorUser.id || creatorUser.uid,
+    createdByName: `${creatorUser.fullName || creatorUser.name} (${creatorUser.role || ''})`,
+    status: 'active',
+    createdAt: `${todayStr} ${timeNow}`,
+    memberCount: teamData.members?.length || 0,
+    serverTimestamp: serverTimestamp()
+  };
+
+  await setDoc(teamRef, payload);
+  return teamRef.id;
+}
+
+// Update Team (Edit title, description, department, status, leader)
+export async function updateTeam(teamId, updateData, user) {
+  const teamRef = doc(db, TEAMS_COL, teamId);
+  await updateDoc(teamRef, {
+    ...updateData,
+    updatedAt: serverTimestamp(),
+    lastModifiedBy: `${user.fullName || user.name} (${user.role || ''})`
+  });
+}
+
+// Add members to Team with duplicate prevention & audit record
+export async function addTeamMembers(teamId, teamName, memberEmployees, addedByUser) {
+  const todayStr = getTodayDateString();
+  const timeNow = new Date().toLocaleTimeString();
+  const batch = writeBatch(db);
+
+  for (const emp of memberEmployees) {
+    const empId = emp.id || emp.uid;
+    // Unique composite ID: teamId_employeeId to strictly prevent duplicate membership
+    const memberDocRef = doc(db, TEAM_MEMBERS_COL, `${teamId}_${empId}`);
+    batch.set(memberDocRef, {
+      id: `${teamId}_${empId}`,
+      teamId,
+      teamName,
+      employeeId: emp.employeeId || empId,
+      userId: empId,
+      fullName: emp.fullName || emp.name,
+      role: emp.role || emp.designation,
+      department: emp.department || emp.departmentId,
+      email: emp.email || '',
+      addedById: addedByUser.id || addedByUser.uid,
+      addedByName: `${addedByUser.fullName || addedByUser.name} (${addedByUser.role || ''})`,
+      addedAt: `${todayStr} ${timeNow}`,
+      status: 'active',
+      serverTimestamp: serverTimestamp()
+    }, { merge: true });
+  }
+
+  await batch.commit();
+
+  // Update team member count
+  const allMembersSnap = await getDocs(query(collection(db, TEAM_MEMBERS_COL), where('teamId', '==', teamId), where('status', '==', 'active')));
+  await updateDoc(doc(db, TEAMS_COL, teamId), {
+    memberCount: allMembersSnap.size,
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Remove member from Team
+export async function removeTeamMember(teamId, userId) {
+  const memberDocRef = doc(db, TEAM_MEMBERS_COL, `${teamId}_${userId}`);
+  await deleteDoc(memberDocRef);
+
+  const allMembersSnap = await getDocs(query(collection(db, TEAM_MEMBERS_COL), where('teamId', '==', teamId), where('status', '==', 'active')));
+  await updateDoc(doc(db, TEAMS_COL, teamId), {
+    memberCount: allMembersSnap.size,
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Transfer team member to another team
+export async function transferTeamMember(fromTeamId, toTeamId, toTeamName, employee, user) {
+  await removeTeamMember(fromTeamId, employee.id || employee.uid);
+  await addTeamMembers(toTeamId, toTeamName, [employee], user);
+}
+
+/**
  * Update an employee profile in the users collection
  */
 export async function saveEmployeeProfile(employeeId, data) {

@@ -6,7 +6,7 @@ import {
   X, Loader2, Download, ArrowDownRight, Network, Archive
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { canManageEmployees } from './permissions';
+import { canManageEmployees, canManageOrgStructure } from './permissions';
 import { COMPANY_DEPARTMENTS, ORG_TREE, getRoleLevel } from './orgTree';
 import { apiCreateEmployee, apiSetEmployeeStatus, apiResetEmployeePassword } from './firebase';
 import EditEmployeeModal from './EditEmployeeModal';
@@ -62,6 +62,7 @@ export default function OrganizationManagementView({
   };
 
   const isHR = canManageEmployees(currentUser);
+  const canManageOrg = canManageOrgStructure(currentUser);
   const currentUserId = currentUser?.id || currentUser?.uid || currentUser?.employeeId;
 
   // Click outside to dismiss overflow menu
@@ -687,7 +688,7 @@ export default function OrganizationManagementView({
                 Departments with assigned employees can only be archived, never accidentally deleted.
               </p>
             </div>
-            {isHR && (
+            {canManageOrg && (
               <button
                 type="button"
                 onClick={() => setIsAddDepartmentOpen(true)}
@@ -729,7 +730,7 @@ export default function OrganizationManagementView({
                       <p className="text-xs text-slate-500 mt-0.5">{dept.description || 'Corporate division.'}</p>
                     </div>
 
-                    {isHR && (
+                    {canManageOrg && (
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
@@ -772,7 +773,7 @@ export default function OrganizationManagementView({
                 Designations placed in org tree to preserve task assignment hierarchy.
               </p>
             </div>
-            {isHR && (
+            {canManageOrg && (
               <button
                 type="button"
                 onClick={() => setIsAddDesignationOpen(true)}
@@ -806,7 +807,7 @@ export default function OrganizationManagementView({
 
                   <div className="flex items-center gap-3">
                     <span className="text-slate-500">{assignedCount} employees</span>
-                    {isHR && (
+                    {canManageOrg && (
                       <button
                         type="button"
                         onClick={() => setEditingDesignation(des)}

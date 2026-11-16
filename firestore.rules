@@ -16,7 +16,7 @@ service cloud.firestore {
       return role == 'Executive Director' || role == 'Director Operations';
     }
 
-    // Company Management Scope
+    // Company Management Scope (Leadership & HR/Admin Managers)
     function isCompanyScope() {
       let role = getUserData().role;
       return isAllAccessPerformanceRole() || 
@@ -24,6 +24,21 @@ service cloud.firestore {
              role == 'HR Manager' ||
              role == 'Admin Manager' ||
              role == 'HR & Admin Manager';
+    }
+
+    // Explicit helper for managing organization structure, employees, and teams
+    function canManageOrgStructure() {
+      let role = getUserData().role;
+      return isAllAccessPerformanceRole() || 
+             role == 'General Manager' ||
+             role == 'HR Manager' ||
+             role == 'Admin Manager' ||
+             role == 'HR & Admin Manager';
+    }
+
+    // Check if user is top leadership (Executive Director or Director Operations)
+    function isTopLeadership() {
+      return isAllAccessPerformanceRole();
     }
 
     // Department Head check
@@ -71,38 +86,38 @@ service cloud.firestore {
     // --- USERS / EMPLOYEES COLLECTION ---
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isCompanyScope();
+      allow create: if isAuthenticated() && canManageOrgStructure();
       allow update: if isAuthenticated() && (
-        isCompanyScope() ||
+        canManageOrgStructure() ||
         (
           request.auth.uid == userId && 
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'photoUrl', 'avatar', 'updatedAt'])
         )
       );
-      allow delete: if isAuthenticated() && isCompanyScope();
+      allow delete: if isAuthenticated() && canManageOrgStructure();
     }
 
     // --- DEPARTMENTS & DESIGNATIONS ---
     match /departments/{deptId} {
       allow read: if true;
-      allow write: if isAuthenticated() && isCompanyScope();
+      allow write: if isAuthenticated() && canManageOrgStructure();
     }
 
     match /designations/{desId} {
       allow read: if true;
-      allow write: if isAuthenticated() && isCompanyScope();
+      allow write: if isAuthenticated() && canManageOrgStructure();
     }
 
     match /organizationSettings/{settingId} {
       allow read: if true;
-      allow write: if isAuthenticated() && isCompanyScope();
+      allow write: if isAuthenticated() && canManageOrgStructure();
     }
 
     // --- TEAMS COLLECTION ---
     match /teams/{teamId} {
       allow read: if isAuthenticated();
       allow create, update, delete: if isAuthenticated() && (
-        isCompanyScope() || 
+        canManageOrgStructure() || 
         (getUserData().role == 'Operations Head' && resource.data.departmentId == 'operations')
       );
     }
@@ -110,7 +125,7 @@ service cloud.firestore {
     // --- TEAM MEMBERS COLLECTION ---
     match /teamMembers/{memberId} {
       allow read: if isAuthenticated();
-      allow create, update, delete: if isAuthenticated() && isCompanyScope();
+      allow create, update, delete: if isAuthenticated() && canManageOrgStructure();
     }
 
     // --- TASKS COLLECTION ---

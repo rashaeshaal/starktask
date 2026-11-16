@@ -93,13 +93,20 @@ export default function CompanyDashboardView({
 
   const completionPct = totalTasksToday > 0 ? Math.round((completedToday / totalTasksToday) * 100) : 0;
 
+  // Check if current user is in HR leadership
+  const isHRManager = useMemo(() => {
+    const r = (currentUser?.role || '').toLowerCase();
+    return r.includes('hr manager') || r.includes('admin manager');
+  }, [currentUser]);
+
   // Sub-label matching scope
   const scopeKpiLabel = useMemo(() => {
+    if (isHRManager) return 'Your team';
     if (scope === SCOPES.COMPANY) return 'Across the company';
     if (scope === SCOPES.DEPARTMENT) return 'Your department';
     if (scope === SCOPES.DOWNLINE) return 'Your squad';
     return 'Assigned to you';
-  }, [scope]);
+  }, [scope, isHRManager]);
 
   // Department cards (for COMPANY SCOPE only, 10 operational depts, excluding management)
   const departmentStats = useMemo(() => {
@@ -173,9 +180,9 @@ export default function CompanyDashboardView({
     });
   }, [scope, currentUser, teams, scopedTasks, todayStr]);
 
-  // Squad table members (for DOWNLINE SCOPE)
+  // Squad table members (for DOWNLINE SCOPE or HR Management)
   const squadMembersStats = useMemo(() => {
-    if (scope !== SCOPES.DOWNLINE) return [];
+    if (scope !== SCOPES.DOWNLINE && !isHRManager) return [];
     
     const myId = String(currentUser.id || currentUser.uid || currentUser.employeeId);
     const downlineEmp = employees.filter(e => {
@@ -204,7 +211,7 @@ export default function CompanyDashboardView({
         status: ovd > 0 ? 'Needs Attention' : total > 0 && done === total ? 'All Complete' : total > 0 ? 'In Progress' : 'No Tasks'
       };
     });
-  }, [scope, currentUser, employees, visibleUserIds, tasks, todayStr]);
+  }, [scope, isHRManager, currentUser, employees, visibleUserIds, tasks, todayStr]);
 
   // Frontline Next Deadlines (for SELF SCOPE)
   const myNextDeadlines = useMemo(() => {
@@ -348,10 +355,79 @@ export default function CompanyDashboardView({
 
       </div>
 
+      {/* 2.5 Quick HR Management Actions Strip (Shown for HR & Leadership roles with manage rights) */}
+      {(canAccess(currentUser, PAGES.ORGANIZATION) || canAccess(currentUser, PAGES.TEAMS)) && isHRManager && (
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-emerald-700" />
+              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">HR Operations & Workgroup Actions</h3>
+            </div>
+            <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-800 px-2.5 py-0.5 rounded-full border border-emerald-200">
+              Management Portal
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <button
+              onClick={() => onNavigateToTab && onNavigateToTab('organization')}
+              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition group cursor-pointer"
+            >
+              <div className="w-7 h-7 rounded-lg bg-emerald-100/70 text-[#05331F] flex items-center justify-center shrink-0">
+                <Plus className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-800 truncate">Add Employee</p>
+                <p className="text-[10px] text-slate-400 truncate">New staff onboarding</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => onNavigateToTab && onNavigateToTab('organization')}
+              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition group cursor-pointer"
+            >
+              <div className="w-7 h-7 rounded-lg bg-slate-200/70 text-slate-700 flex items-center justify-center shrink-0">
+                <Users className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-800 truncate">Import Directory</p>
+                <p className="text-[10px] text-slate-400 truncate">Bulk Excel/CSV upload</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => onNavigateToTab && onNavigateToTab('teams')}
+              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition group cursor-pointer"
+            >
+              <div className="w-7 h-7 rounded-lg bg-slate-200/70 text-slate-700 flex items-center justify-center shrink-0">
+                <Briefcase className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-800 truncate">Create Team</p>
+                <p className="text-[10px] text-slate-400 truncate">Workgroup placement</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => onNavigateToTab && onNavigateToTab('approvals')}
+              className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 hover:bg-amber-50 hover:border-amber-200 border border-slate-200 text-left transition group cursor-pointer"
+            >
+              <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-800 truncate">Pending Sign-Offs</p>
+                <p className="text-[10px] text-slate-400 truncate">Review completion requests</p>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 3. Scope-Appropriate Middle Block */}
 
-      {/* CASE A: COMPANY SCOPE -> 10 Department Cards */}
-      {scope === SCOPES.COMPANY && departmentStats.length > 0 && (
+      {/* CASE A: COMPANY SCOPE (Except HR Manager) -> 10 Department Cards */}
+      {scope === SCOPES.COMPANY && !isHRManager && departmentStats.length > 0 && (
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -438,13 +514,17 @@ export default function CompanyDashboardView({
         </div>
       )}
 
-      {/* CASE C: DOWNLINE SCOPE -> Squad Table */}
-      {scope === SCOPES.DOWNLINE && squadMembersStats.length > 0 && (
+      {/* CASE C: DOWNLINE SCOPE OR HR MANAGEMENT -> Squad Table */}
+      {(scope === SCOPES.DOWNLINE || isHRManager) && squadMembersStats.length > 0 && (
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-900">Your Squad Performance</h2>
-              <p className="text-xs text-slate-500">Today's direct downline task execution</p>
+              <h2 className="text-sm font-bold text-slate-900">
+                {isHRManager ? 'HR & Administration Squad' : 'Your Squad Performance'}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {isHRManager ? "Direct downline task throughput across HR & Admin team" : "Today's direct downline task execution"}
+              </p>
             </div>
             {canAccess(currentUser, PAGES.TEAM_PERFORMANCE) && (
               <button

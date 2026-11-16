@@ -47,7 +47,9 @@ export default function TaskAssignmentModal({
   onTaskCreated 
 }) {
   const isUniversal = canViewAll(currentUser);
-  const isGlobalManager = isGlobalTeamManager(currentUser) || isUniversal;
+  // Executive Director and Director Operations have universal all-company assignment
+  const isTopExecutive = isUniversal || ['Executive Director', 'Director Operations'].includes(currentUser?.role);
+  const isGlobalManager = isTopExecutive;
   const isSales = canAccessSales(currentUser);
 
   // Department choice

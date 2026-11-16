@@ -24,6 +24,39 @@ export const TEST_PERSONAS = [
     forbidden: []
   },
   {
+    id: 'emp_104',
+    uid: 'emp_104',
+    fullName: 'SHAHEEN NAZAR',
+    email: 'shaheen@starkdoors.com',
+    role: 'HR Manager',
+    department: 'hr_admin',
+    expectedScope: SCOPES.COMPANY,
+    allowed: ['Full Directory (Employees)', 'HR Squad Table', 'Assign to HR Downline', 'Add/Edit Teams', 'Manage Org Structure'],
+    forbidden: ['Company-wide Task Assignment', 'Sales Bookings', '10 Dept Overview']
+  },
+  {
+    id: 'emp_104_admin',
+    uid: 'emp_104_admin',
+    fullName: 'Admin Manager Test',
+    email: 'admin.mgr@starkdoors.com',
+    role: 'Admin Manager',
+    department: 'hr_admin',
+    expectedScope: SCOPES.COMPANY,
+    allowed: ['Full Directory (Employees)', 'HR Squad Table', 'Assign to Admin Exec/IT/Housekeeping', 'Manage Org Structure'],
+    forbidden: ['Company-wide Task Assignment', 'Assign to HR Exec']
+  },
+  {
+    id: 'emp_155',
+    uid: 'emp_155',
+    fullName: 'HR Executive Test',
+    email: 'hr.exec@starkdoors.com',
+    role: 'HR Executive',
+    department: 'hr_admin',
+    expectedScope: SCOPES.SELF,
+    allowed: ['Dashboard (My Tasks Today)', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
+    forbidden: ['Employees Directory', 'Assign Task', 'Manage Teams', 'Approvals', 'Reports']
+  },
+  {
     id: 'emp_102',
     uid: 'emp_102',
     fullName: 'ABDUL MAJEED',
