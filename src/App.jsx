@@ -484,7 +484,7 @@ export default function App() {
         </main>
 
         {/* MOBILE BOTTOM NAVIGATION BAR FOR PWA */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 flex items-center justify-around shadow-lg safe-pb">
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-2 flex items-center justify-around shadow-lg safe-pb">
           <button
             onClick={() => setActiveTab('my_tasks')}
             className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all ${
@@ -526,14 +526,16 @@ export default function App() {
             <span className="text-[10px]">Reports</span>
           </button>
 
+          {/* More Menu Button - Opens Full Sidebar Drawer on Mobile */}
           <button
-            onClick={() => setActiveTab('organization')}
+            onClick={() => setIsMobileSidebarOpen(true)}
             className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all ${
-              activeTab === 'organization' ? 'text-[#05331F] font-bold' : 'text-slate-400'
+              isMobileSidebarOpen ? 'text-[#05331F] font-bold' : 'text-slate-400 hover:text-[#05331F]'
             }`}
+            title="All Pages & Menu"
           >
-            <Building2 className="w-5 h-5" />
-            <span className="text-[10px]">Staff</span>
+            <Menu className="w-5 h-5" />
+            <span className="text-[10px]">More</span>
           </button>
         </nav>
       </div>

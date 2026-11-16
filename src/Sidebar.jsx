@@ -75,9 +75,11 @@ export default function Sidebar({
         />
       )}
 
-      {/* Main Sidebar - Hidden completely on mobile (replaced by Native Bottom Nav) */}
+      {/* Main Sidebar - Desktop fixed, Mobile slide-out drawer */}
       <aside className={`
-        fixed top-0 bottom-0 left-0 z-50 bg-[#05331F] text-white hidden lg:flex flex-col transition-all duration-300 ease-in-out border-r border-emerald-950/70 shadow-2xl select-none
+        fixed top-0 bottom-0 left-0 z-50 bg-[#05331F] text-white flex flex-col transition-all duration-300 ease-in-out border-r border-emerald-950/70 shadow-2xl select-none
+        w-72 max-w-[85vw] lg:max-w-none
+        ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         ${isCollapsed ? 'lg:w-[72px]' : 'lg:w-64'}
       `}>
         
@@ -87,7 +89,7 @@ export default function Sidebar({
             <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center font-bold shrink-0 border border-emerald-400/30 shadow-inner">
               <Building2 className="w-5 h-5 text-emerald-300" />
             </div>
-            {!isCollapsed && (
+            {(!isCollapsed || isMobileOpen) && (
               <div className="truncate">
                 <div className="font-bold text-xs tracking-wider text-white truncate flex items-center gap-1.5">
                   <span>STARK STEEL</span>
@@ -98,14 +100,25 @@ export default function Sidebar({
             )}
           </div>
 
-          {/* Desktop Collapse Toggle */}
-          <button
-            onClick={onToggleCollapse}
-            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="p-1.5 text-emerald-300/80 hover:text-white rounded-lg hover:bg-emerald-900/40 transition-colors ml-auto"
-          >
-            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Mobile Close Button */}
+            <button
+              onClick={onCloseMobile}
+              title="Close navigation"
+              className="lg:hidden p-2 text-emerald-300/80 hover:text-white rounded-lg hover:bg-emerald-900/40 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Desktop Collapse Toggle */}
+            <button
+              onClick={onToggleCollapse}
+              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="hidden lg:flex p-1.5 text-emerald-300/80 hover:text-white rounded-lg hover:bg-emerald-900/40 transition-colors ml-auto"
+            >
+              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
 
         {/* Quick Assign Action (if permitted) */}
