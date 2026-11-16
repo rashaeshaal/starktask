@@ -1,0 +1,34 @@
+import { initializeApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import { getAnalytics, isSupported } from "firebase/analytics";
+
+// Your web app's Firebase configuration (supports .env variables with hardcoded fallbacks)
+export const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyB_Sjfj6UBSqQHee5P1Dpf-ZKXHE8falUs",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "starktask-e74ac.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "starktask-e74ac",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "starktask-e74ac.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "203687528050",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:203687528050:web:cea8c5928e805731d364eb",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-Z67GBN7VYZ"
+};
+
+// Initialize Firebase App
+const app = initializeApp(firebaseConfig);
+
+// Initialize Cloud Firestore and Authentication
+export const db = getFirestore(app);
+export const auth = getAuth(app);
+
+// Initialize Analytics conditionally (only in browser environments where supported)
+export let analytics = null;
+if (typeof window !== "undefined") {
+  isSupported().then((supported) => {
+    if (supported) {
+      analytics = getAnalytics(app);
+    }
+  }).catch(() => {});
+}
+
+export default app;
