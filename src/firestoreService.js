@@ -70,14 +70,6 @@ export async function initializeCompanyStructure() {
   }
 }
 
-      await batch.commit();
-      console.log('Company structure successfully initialized in Cloud Firestore.');
-    }
-  } catch (err) {
-    console.error('Error during company structure initialization:', err);
-  }
-}
-
 /**
  * Listen to live departments
  */
