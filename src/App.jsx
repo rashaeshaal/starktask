@@ -478,14 +478,14 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Dev Role Switcher */}
-              <DevRoleSwitcher 
+              {/* Dev Role Switcher (Hidden) */}
+              {/* <DevRoleSwitcher 
                 activeEmployee={activeEmployee} 
                 onSwitchRole={(persona) => {
                   setDevOverrideUser(persona);
                   setActiveTab('dashboard');
                 }} 
-              />
+              /> */}
 
               {/* PWA Install Button */}
               <PwaInstallPrompt />
