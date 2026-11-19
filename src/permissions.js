@@ -957,7 +957,12 @@ export function isGlobalManager(user) {
 export function isGlobalTeamManager(user) {
   if (!user) return false;
   const role = user.role || '';
-  return role === 'Executive Director' || role === 'Director Operations' || role === 'General Manager' || role === 'HR Manager';
+  return role === 'Executive Director' || 
+         role === 'Director Operations' || 
+         role === 'General Manager' || 
+         role === 'HR Manager' || 
+         role === 'HR & Admin Manager' ||
+         role === 'Admin Manager';
 }
 
 export function getAllowedManagementDepartments(user, allDepartments = []) {

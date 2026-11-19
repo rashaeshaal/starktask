@@ -245,6 +245,8 @@ export function normalizeRole(role) {
   if (r === 'Warehouse Executive' || r === 'QC Supervisor' || r === 'Dispatch Supervisor') return 'Warehouse Supervisor';
   if (r === 'Accounts Executive') return 'Accounts Manager';
   if (r === 'Junior Accountant') return 'Accountant';
+  if (r === 'HR & Admin Manager') return 'HR Manager';
+  if (r === 'Housekeeper') return 'Housekeeping';
   return r;
 }
 
