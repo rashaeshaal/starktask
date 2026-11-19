@@ -329,9 +329,6 @@ export default function AddTodayWorkModal({
 
     try {
       const docRef = await addDoc(collection(db, 'tasks'), newTask);
-      if (onTaskCreated) {
-        onTaskCreated({ id: docRef.id, ...newTask });
-      }
       onClose();
     } catch (err) {
       console.error('Error saving self-logged task:', err);
