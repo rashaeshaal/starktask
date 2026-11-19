@@ -456,17 +456,10 @@ export default function App() {
               </button>
 
               <div className="flex items-center gap-2">
-                <h1 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
-                  <span>{activeEmployee.fullName || activeEmployee.name}</span>
-                  <span className="text-[10px] bg-[#05331F]/10 text-[#05331F] font-bold px-2 py-0.5 rounded-full">
-                    {activeEmployee.role}
-                  </span>
-                </h1>
-
                 {/* Quick Search Trigger Pill */}
                 <button
                   onClick={() => setIsQuickSearchOpen(true)}
-                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/70 text-slate-500 text-[11px] font-medium transition ml-2 border border-slate-200"
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/70 text-slate-500 text-[11px] font-medium transition border border-slate-200"
                 >
                   <Search className="w-3 h-3 text-slate-400" />
                   <span>Search</span>
