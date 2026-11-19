@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  CheckSquare, Square, Plus, Trash2, Clock, Calendar, 
+  Plus, Trash2, Clock, Calendar, 
   Bell, AlertCircle, CheckCircle2, ChevronDown, Filter, 
-  Edit2, ChevronRight, X, AlertTriangle, Search, Repeat,
-  CalendarDays, Check, MoreVertical, ArrowRight, ExternalLink,
-  Bookmark, Sparkles, Loader2
+  Edit2, ChevronRight, X, Search, Star,
+  BookOpen, FileText, CheckSquare, Square,
+  Paperclip, Image as ImageIcon, Send, Pin, Sparkles,
+  Tag, FolderPlus, MoreHorizontal, ArrowRight,
+  ExternalLink, Check, Copy, Palette
 } from 'lucide-react';
 import { db } from './firebase';
 import { 
@@ -13,66 +15,19 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
 
-const PRIORITIES = {
-  LOW: 'Low',
-  MEDIUM: 'Medium',
-  HIGH: 'High'
-};
-
-const REMINDER_OPTIONS = [
-  { value: 'none', label: 'None' },
-  { value: 'at_due', label: 'At due time' },
-  { value: '10_min', label: '10 minutes before' },
-  { value: '1_hour', label: '1 hour before' },
-  { value: '1_day', label: '1 day before' }
+// Zoho Cliq Inspired Vibrant Sticky Note Colors
+export const NOTE_COLORS = [
+  { id: 'mint', name: 'Mint Green', bg: 'bg-[#C2E7DA]', text: 'text-emerald-950', border: 'border-emerald-300', accent: '#A2D2C2' },
+  { id: 'amber', name: 'Amber Gold', bg: 'bg-[#F9BC60]', text: 'text-amber-950', border: 'border-amber-400', accent: '#E8A73E' },
+  { id: 'cyan', name: 'Cyan Aqua', bg: 'bg-[#98D8D8]', text: 'text-cyan-950', border: 'border-cyan-300', accent: '#72C2C2' },
+  { id: 'purple', name: 'Royal Purple', bg: 'bg-[#432371]', text: 'text-white', border: 'border-purple-800', accent: '#5A3494', isDark: true },
+  { id: 'yellow', name: 'Warm Yellow', bg: 'bg-[#F3C053]', text: 'text-yellow-950', border: 'border-yellow-400', accent: '#DDAA3D' },
+  { id: 'rose', name: 'Coral Rose', bg: 'bg-[#F7A072]', text: 'text-rose-950', border: 'border-rose-300', accent: '#E48654' },
+  { id: 'blue', name: 'Sky Blue', bg: 'bg-[#A0C4E2]', text: 'text-blue-950', border: 'border-blue-300', accent: '#82AFD6' },
+  { id: 'dark', name: 'Dark Slate', bg: 'bg-[#1E293B]', text: 'text-slate-100', border: 'border-slate-700', accent: '#334155', isDark: true }
 ];
 
-const REPEAT_OPTIONS = [
-  { value: 'None', label: 'None' },
-  { value: 'Daily', label: 'Daily' },
-  { value: 'Weekly', label: 'Weekly' }
-];
-
-// Helper to compute remindAt Timestamp based on dueAt Date and selected option
-function computeRemindAt(dueDateObj, reminderOption) {
-  if (!dueDateObj || reminderOption === 'none') return null;
-  const timeMs = dueDateObj.getTime();
-  let remindMs = timeMs;
-
-  if (reminderOption === '10_min') {
-    remindMs = timeMs - (10 * 60 * 1000);
-  } else if (reminderOption === '1_hour') {
-    remindMs = timeMs - (60 * 60 * 1000);
-  } else if (reminderOption === '1_day') {
-    remindMs = timeMs - (24 * 60 * 60 * 1000);
-  }
-
-  return Timestamp.fromDate(new Date(remindMs));
-}
-
-// Format relative date nicely
-function formatDisplayDate(dateObj) {
-  if (!dateObj) return '';
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const target = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
-  const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Tomorrow';
-  if (diffDays === -1) return 'Yesterday';
-  if (diffDays < -1) return `${Math.abs(diffDays)}d ago`;
-
-  return dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-// Format time string
-function formatDisplayTime(dateObj) {
-  if (!dateObj) return '';
-  return dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-}
-
-export default function TodoReminders({ 
+export default function TodoReminders({
   currentUser: propUser,
   onOpenAssignModal,
   onOpenTaskDetails
@@ -81,1182 +36,961 @@ export default function TodoReminders({
   const effectiveUser = propUser || userProfile || authUser;
   const uid = effectiveUser?.uid || effectiveUser?.id || authUser?.uid || null;
 
-  // Real-time Todos from Firestore
-  const [todos, setTodos] = useState([]);
+  // Real-time Notes & Notebooks from Firestore
+  const [notes, setNotes] = useState([]);
+  const [notebooks, setNotebooks] = useState(['My Notebook', 'Swarnam Notes', 'Production']);
   const [loading, setLoading] = useState(true);
 
-  // Active filter state: 'all' | 'today' | 'overdue' | 'done'
-  const [activeFilter, setActiveFilter] = useState('all');
+  // Navigation & Filtering
+  const [activeNotebook, setActiveNotebook] = useState('All Notes');
+  const [activeNavView, setActiveNavView] = useState('all'); // 'all', 'starred', 'todos', 'reminders'
   const [searchQuery, setSearchQuery] = useState('');
-  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [selectedNote, setSelectedNote] = useState(null);
 
-  // Quick Add Bar State
-  const [quickTitle, setQuickTitle] = useState('');
-  const [quickDate, setQuickDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [quickTime, setQuickTime] = useState('');
-  const [isQuickAdding, setIsQuickAdding] = useState(false);
+  // Note Editor State (Drafting / Editing)
+  const [editorTitle, setEditorTitle] = useState('');
+  const [editorContent, setEditorContent] = useState('');
+  const [editorColor, setEditorColor] = useState('mint');
+  const [editorChecklist, setEditorChecklist] = useState([]); // [{ id, text, done }]
+  const [editorNotebook, setEditorNotebook] = useState('My Notebook');
+  const [editorNewChecklistText, setEditorNewChecklistText] = useState('');
+  const [editorTags, setEditorTags] = useState([]);
+  const [newTagInput, setNewTagInput] = useState('');
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Modal State (Add / Edit)
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTodo, setEditingTodo] = useState(null);
-  const [modalTitle, setModalTitle] = useState('');
-  const [modalNotes, setModalNotes] = useState('');
-  const [modalDueDate, setModalDueDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [modalDueTime, setModalDueTime] = useState('18:00');
-  const [modalReminder, setModalReminder] = useState('none');
-  const [modalPriority, setModalPriority] = useState(PRIORITIES.MEDIUM);
-  const [modalRepeat, setModalRepeat] = useState('None');
-  const [modalSubmitting, setModalSubmitting] = useState(false);
-  const [modalError, setModalError] = useState('');
+  // New Notebook Modal
+  const [isNewNotebookModalOpen, setIsNewNotebookModalOpen] = useState(false);
+  const [newNotebookName, setNewNotebookName] = useState('');
 
-  // Active Overflow Menu for row actions
-  const [activeMenuId, setActiveMenuId] = useState(null);
-
-  // Toast Notification State
-  const [toasts, setToasts] = useState([]);
-  const remindedIdsRef = useRef(new Set());
-
-  // Collapsed state for completed group
-  const [isCompletedExpanded, setIsCompletedExpanded] = useState(false);
-
-  // Request browser notification permission explicitly when a reminder is configured
-  const requestNotificationPermission = async () => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      if (Notification.permission === 'default') {
-        try {
-          await Notification.requestPermission();
-        } catch (e) {
-          console.warn('Notification permission request error:', e);
-        }
-      }
-    }
-  };
-
-  // Toast helper
-  const showToast = (message) => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, message }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4500);
-  };
-
-  // 1. Subscribe to Firestore `todos` collection for current user (private query by uid)
+  // 1. Subscribe to Notes Collection in Firestore
   useEffect(() => {
-    if (!uid) {
-      setTodos([]);
-      setLoading(false);
-      return;
-    }
-
+    if (!uid) return;
     setLoading(true);
-    const todosRef = collection(db, 'todos');
-    const q = query(todosRef, where('uid', '==', uid));
 
+    const q = query(collection(db, 'todos'), where('uid', '==', uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = [];
+      const items = [];
       snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        list.push({
+        const d = docSnap.data();
+        items.push({
           id: docSnap.id,
-          ...data,
-          dueAtDate: data.dueAt?.toDate ? data.dueAt.toDate() : (data.dueAt ? new Date(data.dueAt) : null),
-          remindAtDate: data.remindAt?.toDate ? data.remindAt.toDate() : (data.remindAt ? new Date(data.remindAt) : null)
+          title: d.title || 'Untitled Note',
+          content: d.notes || d.content || '',
+          color: d.color || 'mint',
+          notebook: d.notebook || 'My Notebook',
+          starred: Boolean(d.starred),
+          pinned: Boolean(d.pinned),
+          done: Boolean(d.done),
+          checklist: Array.isArray(d.checklist) ? d.checklist : [],
+          tags: Array.isArray(d.tags) ? d.tags : [],
+          dueAt: d.dueAt ? d.dueAt.toDate() : null,
+          remindAt: d.remindAt ? d.remindAt.toDate() : null,
+          createdAt: d.createdAt ? d.createdAt.toDate() : (d.timestamp ? d.timestamp.toDate() : new Date()),
+          linkedTaskId: d.linkedTaskId || null,
+          assignedToName: d.assignedToName || null,
+          priority: d.priority || 'Medium'
         });
       });
 
-      // Sort by dueAt ascending
-      list.sort((a, b) => {
-        const timeA = a.dueAtDate ? a.dueAtDate.getTime() : 0;
-        const timeB = b.dueAtDate ? b.dueAtDate.getTime() : 0;
-        return timeA - timeB;
+      // Sort: pinned first, then newest
+      items.sort((a, b) => {
+        if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+        return (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0);
       });
 
-      setTodos(list);
+      setNotes(items);
       setLoading(false);
+
+      // Auto-extract distinct notebooks
+      const customNbs = new Set(['My Notebook']);
+      items.forEach(n => {
+        if (n.notebook) customNbs.add(n.notebook);
+      });
+      setNotebooks(Array.from(customNbs));
+
+      // Keep selectedNote in sync if editing
+      setSelectedNote(prev => {
+        if (!prev) return items[0] || null;
+        return items.find(n => n.id === prev.id) || items[0] || null;
+      });
     }, (err) => {
-      console.error('Error listening to todos:', err);
+      console.error('Error fetching notes:', err);
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, [uid]);
 
-  // 2. Reminder check loop: runs every 30 seconds
+  // Sync selected note to editor form
   useEffect(() => {
-    const checkReminders = async () => {
-      if (!todos.length) return;
-      const now = new Date().getTime();
+    if (selectedNote) {
+      setEditorTitle(selectedNote.title || '');
+      setEditorContent(selectedNote.content || '');
+      setEditorColor(selectedNote.color || 'mint');
+      setEditorChecklist(selectedNote.checklist || []);
+      setEditorNotebook(selectedNote.notebook || 'My Notebook');
+      setEditorTags(selectedNote.tags || []);
+    } else {
+      setEditorTitle('');
+      setEditorContent('');
+      setEditorColor('mint');
+      setEditorChecklist([]);
+      setEditorNotebook(activeNotebook !== 'All Notes' ? activeNotebook : 'My Notebook');
+      setEditorTags([]);
+    }
+  }, [selectedNote, activeNotebook]);
 
-      for (const todo of todos) {
-        if (todo.done || todo.reminded || !todo.remindAtDate) continue;
-        const remindTime = todo.remindAtDate.getTime();
-
-        if (now >= remindTime && !remindedIdsRef.current.has(todo.id)) {
-          remindedIdsRef.current.add(todo.id);
-
-          try {
-            await updateDoc(doc(db, 'todos', todo.id), { reminded: true });
-          } catch (e) {
-            console.error('Failed to update reminded state:', e);
-          }
-
-          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-            try {
-              new Notification('STARK STEEL Task Reminder', {
-                body: `${todo.title} is due at ${formatDisplayTime(todo.dueAtDate)}`,
-                icon: '/favicon.ico'
-              });
-            } catch (err) {
-              console.warn('Native notification failed:', err);
-            }
-          }
-
-          showToast(`Reminder: ${todo.title} is due!`);
-        }
-      }
-    };
-
-    checkReminders();
-    const interval = setInterval(checkReminders, 30000);
-    return () => clearInterval(interval);
-  }, [todos]);
-
-  // Close overflow menus on outside click
-  useEffect(() => {
-    const handleOutside = () => setActiveMenuId(null);
-    window.addEventListener('click', handleOutside);
-    return () => window.removeEventListener('click', handleOutside);
-  }, []);
-
-  // Compute counters
-  const counters = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const todayEnd = todayStart + (24 * 60 * 60 * 1000);
-
-    let todayCount = 0;
-    let overdueCount = 0;
-    let upcomingCount = 0;
-    let doneCount = 0;
-
-    todos.forEach(t => {
-      if (t.done) {
-        doneCount++;
-        return;
-      }
-      if (!t.dueAtDate) {
-        todayCount++;
-        return;
-      }
-
-      const dueTime = t.dueAtDate.getTime();
-      if (dueTime < todayStart) {
-        overdueCount++;
-      } else if (dueTime >= todayStart && dueTime < todayEnd) {
-        todayCount++;
-      } else {
-        upcomingCount++;
-      }
-    });
-
-    return { today: todayCount, overdue: overdueCount, upcoming: upcomingCount, done: doneCount };
-  }, [todos]);
-
-  // Filtered Todos
-  const filteredTodos = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const todayEnd = todayStart + (24 * 60 * 60 * 1000);
-
-    return todos.filter(t => {
-      if (activeFilter === 'today') {
-        if (t.done) return false;
-        if (!t.dueAtDate) return true;
-        const time = t.dueAtDate.getTime();
-        return time >= todayStart && time < todayEnd;
-      }
-      if (activeFilter === 'overdue') {
-        if (t.done || !t.dueAtDate) return false;
-        return t.dueAtDate.getTime() < todayStart;
-      }
-      if (activeFilter === 'done') {
-        return !!t.done;
-      }
-
-      if (priorityFilter !== 'all' && t.priority !== priorityFilter) {
+  // Filtered Notes
+  const filteredNotes = useMemo(() => {
+    return notes.filter(n => {
+      // 1. Notebook filter
+      if (activeNotebook !== 'All Notes' && n.notebook !== activeNotebook) {
         return false;
       }
 
+      // 2. Nav view filter
+      if (activeNavView === 'starred' && !n.starred) return false;
+      if (activeNavView === 'todos' && n.checklist.length === 0 && !n.done) return false;
+      if (activeNavView === 'reminders' && !n.remindAt && !n.dueAt) return false;
+
+      // 3. Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchTitle = (t.title || '').toLowerCase().includes(q);
-        const matchNotes = (t.notes || '').toLowerCase().includes(q);
-        if (!matchTitle && !matchNotes) return false;
+        const inTitle = (n.title || '').toLowerCase().includes(q);
+        const inContent = (n.content || '').toLowerCase().includes(q);
+        const inTags = (n.tags || []).some(t => t.toLowerCase().includes(q));
+        const inChecklist = (n.checklist || []).some(c => (c.text || '').toLowerCase().includes(q));
+        if (!inTitle && !inContent && !inTags && !inChecklist) return false;
       }
 
       return true;
     });
-  }, [todos, activeFilter, priorityFilter, searchQuery]);
+  }, [notes, activeNotebook, activeNavView, searchQuery]);
 
-  // Group items: Overdue, Today, Upcoming, and Completed
-  const groupedTodos = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const todayEnd = todayStart + (24 * 60 * 60 * 1000);
+  // Create New Empty Note
+  const handleStartNewNote = (initialType = 'write') => {
+    setSelectedNote(null);
+    setEditorTitle('');
+    setEditorContent('');
+    setEditorColor('mint');
+    setEditorChecklist(initialType === 'todo' ? [{ id: Date.now().toString(), text: '', done: false }] : []);
+    setEditorNotebook(activeNotebook !== 'All Notes' ? activeNotebook : 'My Notebook');
+    setEditorTags([]);
+  };
 
-    const overdue = [];
-    const today = [];
-    const upcoming = [];
-    const completed = [];
+  // Save Note to Firestore (Create or Update)
+  const handleSaveNote = async () => {
+    if (!uid) return;
+    const cleanTitle = editorTitle.trim() || 'Untitled Note';
+    if (!cleanTitle && !editorContent.trim() && editorChecklist.length === 0) return;
 
-    filteredTodos.forEach(t => {
-      if (t.done) {
-        completed.push(t);
-        return;
-      }
-      if (!t.dueAtDate) {
-        today.push(t);
-        return;
-      }
-
-      const time = t.dueAtDate.getTime();
-      if (time < todayStart) {
-        overdue.push(t);
-      } else if (time >= todayStart && time < todayEnd) {
-        today.push(t);
-      } else {
-        upcoming.push(t);
-      }
-    });
-
-    return { overdue, today, upcoming, completed };
-  }, [filteredTodos]);
-
-  // Reminders for the right side panel (upcoming items with a remindAtDate)
-  const remindersPanelItems = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const tomorrowStart = todayStart + (24 * 60 * 60 * 1000);
-    const dayAfterTomorrowStart = tomorrowStart + (24 * 60 * 60 * 1000);
-
-    const todayItems = [];
-    const tomorrowItems = [];
-
-    todos.forEach(t => {
-      if (t.done || !t.remindAtDate) return;
-      const remindTime = t.remindAtDate.getTime();
-
-      if (remindTime >= todayStart && remindTime < tomorrowStart) {
-        todayItems.push(t);
-      } else if (remindTime >= tomorrowStart && remindTime < dayAfterTomorrowStart) {
-        tomorrowItems.push(t);
-      }
-    });
-
-    return { today: todayItems, tomorrow: tomorrowItems };
-  }, [todos]);
-
-  // Quick Add Action
-  const handleQuickAdd = async (e) => {
-    e.preventDefault();
-    if (!quickTitle.trim() || !uid) return;
-
-    setIsQuickAdding(true);
+    setIsSaving(true);
     try {
-      let dueAtTimestamp = null;
-      const datePart = quickDate || new Date().toISOString().split('T')[0];
-      const timePart = quickTime || '18:00';
-      const parsedDate = new Date(`${datePart}T${timePart}:00`);
-      if (!isNaN(parsedDate.getTime())) {
-        dueAtTimestamp = Timestamp.fromDate(parsedDate);
-      }
-
-      const newDoc = {
-        title: quickTitle.trim(),
-        notes: '',
-        dueAt: dueAtTimestamp,
-        remindAt: null,
-        priority: PRIORITIES.MEDIUM,
-        done: false,
-        repeat: 'None',
+      const payload = {
         uid,
-        linkedTaskId: null,
-        reminded: false,
-        createdAt: serverTimestamp()
+        title: cleanTitle,
+        notes: editorContent.trim(),
+        content: editorContent.trim(),
+        color: editorColor,
+        notebook: editorNotebook,
+        checklist: editorChecklist.filter(c => c.text && c.text.trim().length > 0),
+        tags: editorTags,
+        starred: selectedNote ? Boolean(selectedNote.starred) : false,
+        pinned: selectedNote ? Boolean(selectedNote.pinned) : false,
+        done: selectedNote ? Boolean(selectedNote.done) : false,
+        updatedAt: serverTimestamp()
       };
 
-      await addDoc(collection(db, 'todos'), newDoc);
-      setQuickTitle('');
-      setQuickTime('');
-      showToast('To-do added successfully');
-    } catch (err) {
-      console.error('Quick add failed:', err);
-      showToast('Failed to add to-do');
-    } finally {
-      setIsQuickAdding(false);
-    }
-  };
-
-  // Toggle Checkbox (Optimistic with rollback & repeating recurrence handler)
-  const handleToggleDone = async (todo) => {
-    const previousState = todo.done;
-    const nextState = !previousState;
-
-    // Optimistic UI update
-    setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, done: nextState } : t));
-
-    try {
-      await updateDoc(doc(db, 'todos', todo.id), {
-        done: nextState,
-        completedAt: nextState ? serverTimestamp() : null
-      });
-
-      // If repeating to-do is completed, create next occurrence automatically
-      if (nextState && todo.repeat && todo.repeat !== 'None') {
-        let nextDate = todo.dueAtDate ? new Date(todo.dueAtDate.getTime()) : new Date();
-        if (todo.repeat === 'Daily') {
-          nextDate.setDate(nextDate.getDate() + 1);
-        } else if (todo.repeat === 'Weekly') {
-          nextDate.setDate(nextDate.getDate() + 7);
-        }
-
-        const nextDueTimestamp = Timestamp.fromDate(nextDate);
-        let nextRemindTimestamp = null;
-        if (todo.remindAtDate && todo.dueAtDate) {
-          const delta = todo.dueAtDate.getTime() - todo.remindAtDate.getTime();
-          nextRemindTimestamp = Timestamp.fromDate(new Date(nextDate.getTime() - delta));
-        }
-
-        await addDoc(collection(db, 'todos'), {
-          title: todo.title,
-          notes: todo.notes || '',
-          dueAt: nextDueTimestamp,
-          remindAt: nextRemindTimestamp,
-          priority: todo.priority || PRIORITIES.MEDIUM,
-          done: false,
-          repeat: todo.repeat,
-          uid,
-          linkedTaskId: todo.linkedTaskId || null,
-          reminded: false,
-          createdAt: serverTimestamp()
-        });
-        showToast(`Next recurrence scheduled for ${formatDisplayDate(nextDate)}`);
-      }
-    } catch (err) {
-      console.error('Failed to toggle to-do:', err);
-      // Rollback on failure
-      setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, done: previousState } : t));
-      showToast('Failed to update to-do');
-    }
-  };
-
-  // Delete Action
-  const handleDelete = async (todoId) => {
-    try {
-      await deleteDoc(doc(db, 'todos', todoId));
-      showToast('To-do deleted');
-    } catch (err) {
-      console.error('Delete failed:', err);
-      showToast('Failed to delete to-do');
-    }
-  };
-
-  // Convert to Task (Director Operations universal authority)
-  const handleConvertToTask = (todo) => {
-    if (onOpenAssignModal) {
-      onOpenAssignModal({
-        title: todo.title,
-        description: todo.notes || `Created from personal to-do`,
-        deadlineDate: todo.dueAtDate ? todo.dueAtDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-        onSuccess: async (createdTaskId, assignedName) => {
-          try {
-            await updateDoc(doc(db, 'todos', todo.id), {
-              done: true,
-              linkedTaskId: createdTaskId,
-              assignedToName: assignedName || 'Assigned Staff',
-              completedAt: serverTimestamp()
-            });
-            showToast(`Converted to task & assigned to ${assignedName || 'team member'}`);
-          } catch (e) {
-            console.error('Failed to link converted task:', e);
-          }
-        }
-      });
-    }
-  };
-
-  // Open Edit Modal
-  const openEditModal = (todo) => {
-    setEditingTodo(todo);
-    setModalTitle(todo.title || '');
-    setModalNotes(todo.notes || '');
-
-    if (todo.dueAtDate) {
-      setModalDueDate(todo.dueAtDate.toISOString().split('T')[0]);
-      setModalDueTime(todo.dueAtDate.toTimeString().slice(0, 5));
-    } else {
-      setModalDueDate(new Date().toISOString().split('T')[0]);
-      setModalDueTime('18:00');
-    }
-
-    setModalPriority(todo.priority || PRIORITIES.MEDIUM);
-    setModalRepeat(todo.repeat || 'None');
-    setModalReminder('none');
-    setModalError('');
-    setIsModalOpen(true);
-  };
-
-  // Open Create Modal
-  const openCreateModal = () => {
-    setEditingTodo(null);
-    setModalTitle('');
-    setModalNotes('');
-    setModalDueDate(new Date().toISOString().split('T')[0]);
-    setModalDueTime('18:00');
-    setModalPriority(PRIORITIES.MEDIUM);
-    setModalRepeat('None');
-    setModalReminder('none');
-    setModalError('');
-    setIsModalOpen(true);
-  };
-
-  // Modal Submit (Save new or updated to-do)
-  const handleModalSave = async (e) => {
-    e.preventDefault();
-    if (!modalTitle.trim()) {
-      setModalError('Title is required');
-      return;
-    }
-    if (!uid) {
-      setModalError('User authentication missing');
-      return;
-    }
-
-    setModalSubmitting(true);
-    setModalError('');
-
-    try {
-      let dueAtTimestamp = null;
-      let dueDateObj = null;
-
-      if (modalDueDate) {
-        const timePart = modalDueTime || '18:00';
-        dueDateObj = new Date(`${modalDueDate}T${timePart}:00`);
-        if (!isNaN(dueDateObj.getTime())) {
-          dueAtTimestamp = Timestamp.fromDate(dueDateObj);
-        }
-      }
-
-      // If user sets a reminder, ask for notification permission
-      if (modalReminder !== 'none') {
-        await requestNotificationPermission();
-      }
-
-      const remindAtTimestamp = computeRemindAt(dueDateObj, modalReminder);
-
-      if (editingTodo) {
-        await updateDoc(doc(db, 'todos', editingTodo.id), {
-          title: modalTitle.trim(),
-          notes: modalNotes.trim(),
-          dueAt: dueAtTimestamp,
-          remindAt: remindAtTimestamp,
-          priority: modalPriority,
-          repeat: modalRepeat,
-          reminded: false,
-          updatedAt: serverTimestamp()
-        });
-        showToast('To-do updated');
+      if (selectedNote && selectedNote.id) {
+        await updateDoc(doc(db, 'todos', selectedNote.id), payload);
       } else {
-        await addDoc(collection(db, 'todos'), {
-          title: modalTitle.trim(),
-          notes: modalNotes.trim(),
-          dueAt: dueAtTimestamp,
-          remindAt: remindAtTimestamp,
-          priority: modalPriority,
-          repeat: modalRepeat,
-          done: false,
-          uid,
-          linkedTaskId: null,
-          reminded: false,
-          createdAt: serverTimestamp()
-        });
-        showToast('To-do created');
+        payload.createdAt = serverTimestamp();
+        payload.priority = 'Medium';
+        const docRef = await addDoc(collection(db, 'todos'), payload);
+        setSelectedNote({ id: docRef.id, ...payload });
       }
-
-      setIsModalOpen(false);
     } catch (err) {
-      console.error('Failed to save to-do:', err);
-      setModalError('Failed to save to-do. Please try again.');
+      console.error('Failed to save note:', err);
     } finally {
-      setModalSubmitting(false);
+      setIsSaving(false);
     }
   };
 
-  // Priority Pill styling
-  const renderPriorityPill = (p) => {
-    if (p === PRIORITIES.HIGH) {
-      return (
-        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
-          High
-        </span>
-      );
+  // Auto-save debounce on changes
+  const saveTimeoutRef = useRef(null);
+  const handleContentChange = (field, val) => {
+    if (field === 'title') setEditorTitle(val);
+    if (field === 'content') setEditorContent(val);
+    if (field === 'color') setEditorColor(val);
+    if (field === 'notebook') setEditorNotebook(val);
+
+    if (selectedNote && selectedNote.id) {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(async () => {
+        try {
+          const updateData = {
+            [field === 'content' ? 'notes' : field]: val,
+            updatedAt: serverTimestamp()
+          };
+          if (field === 'content') updateData.content = val;
+          await updateDoc(doc(db, 'todos', selectedNote.id), updateData);
+        } catch (e) {
+          console.error('Auto-save error:', e);
+        }
+      }, 700);
     }
-    if (p === PRIORITIES.LOW) {
-      return (
-        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-          Low
-        </span>
-      );
+  };
+
+  // Toggle Star
+  const handleToggleStar = async (note, e) => {
+    e?.stopPropagation();
+    try {
+      await updateDoc(doc(db, 'todos', note.id), {
+        starred: !note.starred,
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error('Error toggling star:', err);
     }
-    return (
-      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-        Medium
-      </span>
+  };
+
+  // Toggle Pin
+  const handleTogglePin = async (note, e) => {
+    e?.stopPropagation();
+    try {
+      await updateDoc(doc(db, 'todos', note.id), {
+        pinned: !note.pinned,
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error('Error toggling pin:', err);
+    }
+  };
+
+  // Delete Note
+  const handleDeleteNote = async (noteId, e) => {
+    e?.stopPropagation();
+    if (!confirm('Are you sure you want to delete this note?')) return;
+    try {
+      await deleteDoc(doc(db, 'todos', noteId));
+      if (selectedNote?.id === noteId) {
+        setSelectedNote(null);
+      }
+    } catch (err) {
+      console.error('Error deleting note:', err);
+    }
+  };
+
+  // Add checklist item in editor
+  const handleAddChecklistItem = () => {
+    if (!editorNewChecklistText.trim()) return;
+    const updated = [
+      ...editorChecklist, 
+      { id: Date.now().toString(), text: editorNewChecklistText.trim(), done: false }
+    ];
+    setEditorChecklist(updated);
+    setEditorNewChecklistText('');
+    if (selectedNote?.id) {
+      updateDoc(doc(db, 'todos', selectedNote.id), { checklist: updated });
+    }
+  };
+
+  // Toggle checklist item
+  const handleToggleChecklistItem = (itemId) => {
+    const updated = editorChecklist.map(item => 
+      item.id === itemId ? { ...item, done: !item.done } : item
     );
+    setEditorChecklist(updated);
+    if (selectedNote?.id) {
+      updateDoc(doc(db, 'todos', selectedNote.id), { checklist: updated });
+    }
   };
 
-  // Render a Single To-Do Row
-  const renderTodoRow = (todo) => {
-    const isOverdue = !todo.done && todo.dueAtDate && todo.dueAtDate.getTime() < new Date().setHours(0, 0, 0, 0);
-
-    return (
-      <div 
-        key={todo.id}
-        className={`p-3.5 rounded-2xl border transition-all duration-150 flex items-center justify-between gap-3 group ${
-          todo.done 
-            ? 'bg-slate-50/70 border-slate-200/80 text-slate-400' 
-            : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs hover:shadow-xs'
-        }`}
-      >
-        {/* Left: Checkbox & Title */}
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={() => handleToggleDone(todo)}
-            className={`w-5 h-5 rounded-lg border flex items-center justify-center transition shrink-0 ${
-              todo.done 
-                ? 'bg-[#10B981] border-[#10B981] text-white' 
-                : 'border-slate-300 hover:border-[#05331F] bg-white'
-            }`}
-          >
-            {todo.done && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
-          </button>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-xs font-semibold truncate ${todo.done ? 'line-through text-slate-400' : 'text-slate-900'}`}>
-                {todo.title}
-              </span>
-              {renderPriorityPill(todo.priority)}
-              {todo.repeat && todo.repeat !== 'None' && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-slate-400">
-                  <Repeat className="w-3 h-3 text-slate-400" />
-                  <span>{todo.repeat}</span>
-                </span>
-              )}
-            </div>
-
-            {/* Notes & Linked Task context */}
-            <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-1 flex-wrap">
-              {todo.dueAtDate && (
-                <span className={`flex items-center gap-1 ${isOverdue ? 'text-rose-600 font-semibold' : 'text-slate-500'}`}>
-                  <Calendar className="w-3 h-3" />
-                  <span>{formatDisplayDate(todo.dueAtDate)}</span>
-                  <span>{formatDisplayTime(todo.dueAtDate)}</span>
-                </span>
-              )}
-
-              {todo.remindAtDate && (
-                <span className="flex items-center gap-1 text-emerald-700">
-                  <Bell className="w-3 h-3" />
-                  <span>Reminder: {formatDisplayTime(todo.remindAtDate)}</span>
-                </span>
-              )}
-
-              {todo.linkedTaskId && (
-                <button
-                  type="button"
-                  onClick={() => onOpenTaskDetails && onOpenTaskDetails({ id: todo.linkedTaskId, title: todo.title })}
-                  className="flex items-center gap-1 text-[#05331F] hover:underline font-semibold"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  <span>Task #{todo.linkedTaskId.slice(0, 6)}</span>
-                  {todo.assignedToName && <span className="text-slate-400">({todo.assignedToName})</span>}
-                </button>
-              )}
-
-              {todo.notes && !todo.linkedTaskId && (
-                <span className="text-slate-400 truncate max-w-xs">{todo.notes}</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Overflow Action Menu */}
-        <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => setActiveMenuId(activeMenuId === todo.id ? null : todo.id)}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-          >
-            <MoreVertical className="w-4 h-4" />
-          </button>
-
-          {activeMenuId === todo.id && (
-            <div className="absolute right-0 mt-1 w-44 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-30 animate-in fade-in duration-100">
-              <button
-                type="button"
-                onClick={() => {
-                  openEditModal(todo);
-                  setActiveMenuId(null);
-                }}
-                className="w-full text-left px-3.5 py-2 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-              >
-                <Edit2 className="w-3.5 h-3.5 text-slate-500" />
-                <span>Edit To-Do</span>
-              </button>
-
-              {/* Director Operations: Convert to delegated task */}
-              <button
-                type="button"
-                onClick={() => {
-                  handleConvertToTask(todo);
-                  setActiveMenuId(null);
-                }}
-                className="w-full text-left px-3.5 py-2 text-xs text-emerald-800 hover:bg-emerald-50 flex items-center gap-2 font-medium"
-              >
-                <ArrowRight className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Convert to Task</span>
-              </button>
-
-              <div className="border-t border-slate-100 my-1" />
-
-              <button
-                type="button"
-                onClick={() => {
-                  handleDelete(todo.id);
-                  setActiveMenuId(null);
-                }}
-                className="w-full text-left px-3.5 py-2 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-2"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                <span>Delete</span>
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
+  // Remove checklist item
+  const handleRemoveChecklistItem = (itemId) => {
+    const updated = editorChecklist.filter(item => item.id !== itemId);
+    setEditorChecklist(updated);
+    if (selectedNote?.id) {
+      updateDoc(doc(db, 'todos', selectedNote.id), { checklist: updated });
+    }
   };
+
+  // Add Tag
+  const handleAddTag = () => {
+    if (!newTagInput.trim()) return;
+    const clean = newTagInput.trim().replace(/^#/, '');
+    if (!editorTags.includes(clean)) {
+      const updated = [...editorTags, clean];
+      setEditorTags(updated);
+      if (selectedNote?.id) {
+        updateDoc(doc(db, 'todos', selectedNote.id), { tags: updated });
+      }
+    }
+    setNewTagInput('');
+  };
+
+  // Promote note to official company task
+  const handlePromoteToTask = (note) => {
+    if (!onOpenAssignModal) return;
+    onOpenAssignModal({
+      title: note.title,
+      description: note.content || (note.checklist || []).map(c => `• ${c.text}`).join('\n'),
+      priority: note.priority || 'Medium',
+      onSuccess: async (createdTaskId, assignedName) => {
+        try {
+          await updateDoc(doc(db, 'todos', note.id), {
+            linkedTaskId: createdTaskId,
+            assignedToName: assignedName || 'Assigned Staff',
+            done: true,
+            updatedAt: serverTimestamp()
+          });
+        } catch (e) {
+          console.error('Failed to link task:', e);
+        }
+      }
+    });
+  };
+
+  // Format relative display date
+  const formatNoteDate = (d) => {
+    if (!d) return '';
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = d.toDateString() === yesterday.toDateString();
+
+    if (isToday) return 'Today, ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (isYesterday) return 'Yesterday';
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+
+  const currentColorConfig = NOTE_COLORS.find(c => c.id === editorColor) || NOTE_COLORS[0];
 
   return (
-    <div className="space-y-6">
+    <div className="h-[calc(100vh-4.5rem)] flex flex-col bg-[#1E293B] text-slate-100 rounded-3xl overflow-hidden shadow-2xl border border-slate-700 font-sans select-none">
       
-      {/* Toast Notifications */}
-      {toasts.length > 0 && (
-        <div className="fixed bottom-20 right-6 z-50 space-y-2">
-          {toasts.map(t => (
-            <div 
-              key={t.id} 
-              className="bg-[#05331F] text-white px-4 py-2.5 rounded-2xl shadow-xl text-xs font-semibold flex items-center gap-2 animate-in slide-in-from-bottom duration-200"
-            >
-              <Bell className="w-3.5 h-3.5 text-[#10B981]" />
-              <span>{t.message}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 1. Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">To-Do & Reminders</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Your private personal planner {'\u00B7'} Accessible only to you
-          </p>
-        </div>
-
-        <button
-          onClick={openCreateModal}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white text-xs font-semibold shadow-2xs transition active:scale-98 shrink-0"
-        >
-          <Plus className="w-4 h-4 text-emerald-300" />
-          <span>Add To-Do</span>
-        </button>
-      </div>
-
-      {/* 2. Counter Cards (Click to Filter) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Today */}
-        <div
-          onClick={() => setActiveFilter(activeFilter === 'today' ? 'all' : 'today')}
-          className={`p-4 sm:p-5 rounded-2xl border cursor-pointer transition ${
-            activeFilter === 'today'
-              ? 'bg-emerald-50/50 border-[#10B981] shadow-xs'
-              : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Today</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
-              <Calendar className="w-4 h-4" />
-            </div>
+      {/* ========================================================
+          TOP ACTION BAR (Cliq Inspired Search & New Note)
+         ======================================================== */}
+      <div className="bg-[#0F172A] border-b border-slate-800 px-4 py-2.5 flex items-center justify-between gap-4 shrink-0">
+        
+        {/* Left: Quick search bar */}
+        <div className="flex items-center gap-3 flex-1 max-w-md">
+          <div className="relative w-full">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search in All Notes (Ctrl + K)..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-[#1E293B] text-xs text-slate-200 placeholder-slate-500 rounded-xl pl-8 pr-3 py-1.5 outline-none border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs"
+              >
+                ✕
+              </button>
+            )}
           </div>
-          <p className="text-2xl font-bold text-slate-900 mt-2">{counters.today}</p>
-          <p className="text-[11px] text-[#10B981] font-semibold mt-0.5">Due today</p>
         </div>
 
-        {/* Overdue */}
-        <div
-          onClick={() => setActiveFilter(activeFilter === 'overdue' ? 'all' : 'overdue')}
-          className={`p-4 sm:p-5 rounded-2xl border cursor-pointer transition ${
-            activeFilter === 'overdue'
-              ? 'bg-rose-50/50 border-rose-500 shadow-xs'
-              : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Overdue</span>
-            <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-rose-600 mt-2">{counters.overdue}</p>
-          <p className="text-[11px] text-rose-500 font-semibold mt-0.5">Requires immediate attention</p>
-        </div>
-
-        {/* Upcoming */}
-        <div
-          onClick={() => setActiveFilter(activeFilter === 'all' ? 'all' : 'all')}
-          className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 hover:border-slate-300 shadow-2xs cursor-pointer transition"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Upcoming</span>
-            <div className="w-8 h-8 rounded-xl bg-slate-50 text-slate-700 flex items-center justify-center">
-              <Clock className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-slate-900 mt-2">{counters.upcoming}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Scheduled forward</p>
-        </div>
-
-        {/* Done */}
-        <div
-          onClick={() => setActiveFilter(activeFilter === 'done' ? 'all' : 'done')}
-          className={`p-4 sm:p-5 rounded-2xl border cursor-pointer transition ${
-            activeFilter === 'done'
-              ? 'bg-slate-100 border-slate-400 shadow-xs'
-              : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Completed</span>
-            <div className="w-8 h-8 rounded-xl bg-slate-50 text-slate-700 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4 text-[#10B981]" />
-            </div>
-          </div>
-          <p className="text-2xl font-bold text-slate-900 mt-2">{counters.done}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Finished items</p>
-        </div>
-      </div>
-
-      {/* 3. Quick-Add Bar */}
-      <form onSubmit={handleQuickAdd} className="bg-white p-2.5 sm:p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center gap-2">
-        <input
-          type="text"
-          placeholder="Quick add a new to-do and press Enter..."
-          value={quickTitle}
-          onChange={(e) => setQuickTitle(e.target.value)}
-          className="w-full sm:flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#05331F]"
-        />
-
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <input
-            type="date"
-            value={quickDate}
-            onChange={(e) => setQuickDate(e.target.value)}
-            className="px-2.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#05331F]"
-          />
-          <input
-            type="time"
-            value={quickTime}
-            onChange={(e) => setQuickTime(e.target.value)}
-            className="px-2 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#05331F]"
-          />
+        {/* Right: + New Note Trigger Button */}
+        <div className="flex items-center gap-2">
           <button
-            type="submit"
-            disabled={isQuickAdding || !quickTitle.trim()}
-            className="px-4 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472B] disabled:opacity-50 text-white text-xs font-semibold shadow-2xs transition shrink-0"
+            onClick={() => handleStartNewNote('write')}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
           >
-            Add
+            <Plus className="w-3.5 h-3.5" />
+            <span>New Note</span>
           </button>
         </div>
-      </form>
+      </div>
 
-      {/* 4. Two-Column Body: Left List & Right Reminders Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* ========================================================
+          THREE-PANEL MAIN WORKSPACE
+         ======================================================== */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         
-        {/* Main List (Left 2 cols) */}
-        <div className="lg:col-span-2 space-y-4">
-          
-          {/* Toolbar: Filter Tabs & Search & Priority */}
-          <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* ----------------------------------------------------
+            PANEL 1: LEFT NAVIGATION (Cliq Notes & Notebooks)
+           ---------------------------------------------------- */}
+        <div className="w-56 bg-[#0F172A] border-r border-slate-800 flex flex-col justify-between py-4 px-2 shrink-0">
+          <div className="space-y-5">
             
-            {/* Filter Tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-              {['all', 'today', 'overdue', 'done'].map((tabKey) => (
-                <button
-                  key={tabKey}
-                  type="button"
-                  onClick={() => setActiveFilter(tabKey)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition ${
-                    activeFilter === tabKey
-                      ? 'bg-[#05331F] text-white shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {tabKey}
-                </button>
-              ))}
-            </div>
-
-            {/* Search & Priority Filter */}
-            <div className="flex items-center gap-2">
-              <div className="relative min-w-[150px]">
-                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search to-dos..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#05331F]"
-                />
-              </div>
-
-              <select
-                value={priorityFilter}
-                onChange={(e) => setPriorityFilter(e.target.value)}
-                className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-700 focus:outline-none"
-              >
-                <option value="all">All Priorities</option>
-                <option value={PRIORITIES.HIGH}>High</option>
-                <option value={PRIORITIES.MEDIUM}>Medium</option>
-                <option value={PRIORITIES.LOW}>Low</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Grouped To-Do Lists */}
-          {loading ? (
-            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 text-slate-400">
-              <Loader2 className="w-6 h-6 animate-spin mx-auto text-emerald-600 mb-2" />
-              <p className="text-xs">Loading planner...</p>
-            </div>
-          ) : filteredTodos.length === 0 ? (
-            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 text-slate-400 space-y-3">
-              <CheckCircle2 className="w-10 h-10 mx-auto text-[#10B981]" />
-              <p className="font-bold text-slate-800">No to-dos in this view</p>
-              <p className="text-xs text-slate-500">Your planner is clear! Click below to create a personal to-do.</p>
+            {/* Notes Section */}
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2.5 block">
+                Notes
+              </span>
+              
               <button
-                onClick={openCreateModal}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#05331F] text-white text-xs font-semibold shadow-xs"
+                onClick={() => { setActiveNavView('all'); setActiveNotebook('All Notes'); }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                  activeNavView === 'all' && activeNotebook === 'All Notes'
+                    ? 'bg-[#1E293B] text-emerald-400 shadow-xs'
+                    : 'text-slate-400 hover:bg-slate-800/70 hover:text-slate-200'
+                }`}
               >
-                <Plus className="w-3.5 h-3.5 text-emerald-300" />
-                <span>Add To-Do</span>
+                <div className="flex items-center gap-2">
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>All Notes</span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-500 bg-slate-800 px-1.5 py-0.2 rounded">
+                  {notes.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => { setActiveNavView('starred'); setActiveNotebook('All Notes'); }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                  activeNavView === 'starred'
+                    ? 'bg-[#1E293B] text-amber-400 shadow-xs'
+                    : 'text-slate-400 hover:bg-slate-800/70 hover:text-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Star className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Starred</span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-500 bg-slate-800 px-1.5 py-0.2 rounded">
+                  {notes.filter(n => n.starred).length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => { setActiveNavView('todos'); setActiveNotebook('All Notes'); }}
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                  activeNavView === 'todos'
+                    ? 'bg-[#1E293B] text-cyan-400 shadow-xs'
+                    : 'text-slate-400 hover:bg-slate-800/70 hover:text-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Checklists</span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-500 bg-slate-800 px-1.5 py-0.2 rounded">
+                  {notes.filter(n => n.checklist.length > 0).length}
+                </span>
               </button>
             </div>
-          ) : (
-            <div className="space-y-4">
-              
-              {/* Group: Overdue */}
-              {groupedTodos.overdue.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-bold text-rose-700">
-                    <AlertTriangle className="w-4 h-4 text-rose-600" />
-                    <span>Overdue ({groupedTodos.overdue.length})</span>
-                  </div>
-                  <div className="space-y-2">
-                    {groupedTodos.overdue.map(renderTodoRow)}
-                  </div>
-                </div>
-              )}
 
-              {/* Group: Today */}
-              {groupedTodos.today.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
-                    <Calendar className="w-4 h-4 text-[#05331F]" />
-                    <span>Today ({groupedTodos.today.length})</span>
-                  </div>
-                  <div className="space-y-2">
-                    {groupedTodos.today.map(renderTodoRow)}
-                  </div>
-                </div>
-              )}
+            {/* Notebooks Section */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between px-2.5">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Notebooks
+                </span>
+                <button
+                  onClick={() => setIsNewNotebookModalOpen(true)}
+                  className="p-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded transition cursor-pointer"
+                  title="Create Notebook"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
-              {/* Group: Upcoming */}
-              {groupedTodos.upcoming.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-                    <Clock className="w-4 h-4 text-slate-500" />
-                    <span>Upcoming ({groupedTodos.upcoming.length})</span>
-                  </div>
-                  <div className="space-y-2">
-                    {groupedTodos.upcoming.map(renderTodoRow)}
-                  </div>
-                </div>
-              )}
+              <div className="space-y-0.5 max-h-48 overflow-y-auto no-scrollbar">
+                {notebooks.map(nb => {
+                  const isCur = activeNotebook === nb && activeNavView === 'all';
+                  const nbCount = notes.filter(n => n.notebook === nb).length;
+                  return (
+                    <button
+                      key={nb}
+                      onClick={() => { setActiveNotebook(nb); setActiveNavView('all'); }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer truncate ${
+                        isCur 
+                          ? 'bg-[#1E293B] text-white shadow-xs' 
+                          : 'text-slate-400 hover:bg-slate-800/70 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                        <span className="truncate">{nb}</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {nbCount}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-              {/* Group: Completed (Collapsible) */}
-              {groupedTodos.completed.length > 0 && (
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsCompletedExpanded(prev => !prev)}
-                    className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200/70 text-slate-600 text-xs font-semibold flex items-center justify-between transition"
+          </div>
+
+          {/* Bottom helper stats */}
+          <div className="p-3 bg-slate-800/50 rounded-2xl border border-slate-800 text-[11px] text-slate-400">
+            <span className="block font-bold text-slate-200">Personal Workspace</span>
+            <span className="text-[10px] text-slate-500">Private notes for {effectiveUser?.fullName || effectiveUser?.name || 'You'}</span>
+          </div>
+        </div>
+
+        {/* ----------------------------------------------------
+            PANEL 2: MIDDLE NOTES CARDS LIST (Cliq Colored Cards)
+           ---------------------------------------------------- */}
+        <div className="w-80 bg-[#162032] border-r border-slate-800 flex flex-col shrink-0">
+          
+          {/* Column Header */}
+          <div className="p-3.5 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div>
+              <h3 className="font-bold text-xs text-slate-200 flex items-center gap-1.5">
+                <span>{activeNotebook === 'All Notes' ? (activeNavView === 'starred' ? 'Starred Notes' : 'All Notes') : activeNotebook}</span>
+              </h3>
+              <p className="text-[10px] text-slate-500">{filteredNotes.length} notes found</p>
+            </div>
+            
+            <button
+              onClick={() => handleStartNewNote('write')}
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+              title="Add Note"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Notes Scrollable Cards Column */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5 no-scrollbar">
+            {loading ? (
+              <div className="p-8 text-center text-xs text-slate-500">Loading notes...</div>
+            ) : filteredNotes.length === 0 ? (
+              <div className="p-8 text-center space-y-2 text-slate-500">
+                <FileText className="w-8 h-8 mx-auto text-slate-600" />
+                <p className="text-xs">No notes found.</p>
+                <button
+                  onClick={() => handleStartNewNote('write')}
+                  className="text-xs text-emerald-400 hover:underline font-bold"
+                >
+                  Create your first note
+                </button>
+              </div>
+            ) : (
+              filteredNotes.map(note => {
+                const isSelected = selectedNote?.id === note.id;
+                const colorConfig = NOTE_COLORS.find(c => c.id === note.color) || NOTE_COLORS[0];
+                const isDark = colorConfig.isDark;
+
+                return (
+                  <div
+                    key={note.id}
+                    onClick={() => setSelectedNote(note)}
+                    className={`relative p-3.5 rounded-2xl cursor-pointer transition-all border shadow-sm ${colorConfig.bg} ${
+                      isSelected 
+                        ? 'ring-2 ring-emerald-400 scale-[1.01] shadow-lg border-white/50' 
+                        : `${colorConfig.border} hover:shadow-md hover:scale-[1.005]`
+                    }`}
                   >
-                    <span>Completed ({groupedTodos.completed.length})</span>
-                    <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isCompletedExpanded ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isCompletedExpanded && (
-                    <div className="space-y-2 mt-2">
-                      {groupedTodos.completed.map(renderTodoRow)}
+                    {/* Top Row: Title + Pin/Star */}
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <h4 className={`text-xs font-bold truncate flex-1 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {note.title}
+                      </h4>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {note.pinned && (
+                          <Pin className={`w-3 h-3 ${isDark ? 'text-amber-300' : 'text-amber-700'} fill-current`} />
+                        )}
+                        <button
+                          onClick={(e) => handleToggleStar(note, e)}
+                          className={`p-0.5 hover:scale-110 transition ${
+                            note.starred 
+                              ? 'text-amber-500 fill-amber-500' 
+                              : isDark ? 'text-slate-400' : 'text-slate-600'
+                          }`}
+                        >
+                          <Star className={`w-3.5 h-3.5 ${note.starred ? 'fill-amber-400 text-amber-400' : ''}`} />
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Content Snippet */}
+                    {note.content && (
+                      <p className={`text-[11px] line-clamp-3 mb-2 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        {note.content}
+                      </p>
+                    )}
+
+                    {/* Checklist preview snippet */}
+                    {note.checklist.length > 0 && (
+                      <div className="space-y-1 mb-2">
+                        {note.checklist.slice(0, 2).map((item, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5 text-[10px]">
+                            {item.done ? (
+                              <CheckSquare className={`w-3 h-3 ${isDark ? 'text-emerald-400' : 'text-emerald-800'}`} />
+                            ) : (
+                              <Square className={`w-3 h-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`} />
+                            )}
+                            <span className={`truncate ${item.done ? 'line-through opacity-60' : ''} ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                              {item.text}
+                            </span>
+                          </div>
+                        ))}
+                        {note.checklist.length > 2 && (
+                          <span className={`text-[9px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                            +{note.checklist.length - 2} more items
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Footer: Date & Notebook Tag */}
+                    <div className="flex items-center justify-between text-[10px] pt-1 border-t border-black/10">
+                      <span className={`font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        {formatNoteDate(note.createdAt)}
+                      </span>
+                      {note.notebook && (
+                        <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                          isDark ? 'bg-black/30 text-slate-300' : 'bg-black/10 text-slate-800'
+                        }`}>
+                          {note.notebook}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* ----------------------------------------------------
+            PANEL 3: RIGHT NOTE DETAILS & EDITOR (Cliq Centered)
+           ---------------------------------------------------- */}
+        <div className="flex-1 flex flex-col bg-[#0F172A] overflow-hidden">
+          
+          {/* When no note is selected: Cliq "Start jotting down your ideas" screen */}
+          {!selectedNote && !editorTitle && !editorContent && editorChecklist.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-6">
+              
+              <div className="space-y-2">
+                <h2 className="text-xl font-bold text-slate-200">Start jotting down your ideas</h2>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  Create sticky notes, task checklists, or quick meeting scribbles that stay saved to your account.
+                </p>
+              </div>
+
+              {/* Zoho Cliq Inspired 5 Action Trigger Tiles */}
+              <div className="flex flex-wrap items-center justify-center gap-3 max-w-md">
+                
+                <button
+                  onClick={() => handleStartNewNote('write')}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 shadow-sm transition active:scale-95 cursor-pointer"
+                >
+                  <Edit2 className="w-4 h-4 text-emerald-400" />
+                  <span>Write</span>
+                </button>
+
+                <button
+                  onClick={() => handleStartNewNote('todo')}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 shadow-sm transition active:scale-95 cursor-pointer"
+                >
+                  <CheckSquare className="w-4 h-4 text-cyan-400" />
+                  <span>To Do</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    handleStartNewNote('write');
+                    setEditorTitle('Meeting Notes - ' + new Date().toLocaleDateString());
+                  }}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 shadow-sm transition active:scale-95 cursor-pointer"
+                >
+                  <BookOpen className="w-4 h-4 text-amber-400" />
+                  <span>Capture</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    handleStartNewNote('write');
+                    setEditorColor('purple');
+                  }}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 shadow-sm transition active:scale-95 cursor-pointer"
+                >
+                  <Palette className="w-4 h-4 text-purple-400" />
+                  <span>Color Note</span>
+                </button>
+
+              </div>
+            </div>
+          ) : (
+            /* Active Note Editor View */
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              
+              {/* Top Editor Toolbar */}
+              <div className="px-6 py-3 border-b border-slate-800 flex items-center justify-between gap-4 shrink-0 bg-[#162032]">
+                
+                {/* Notebook selection & Color Pill */}
+                <div className="flex items-center gap-2 text-xs">
+                  <select
+                    value={editorNotebook}
+                    onChange={(e) => handleContentChange('notebook', e.target.value)}
+                    className="bg-[#1E293B] border border-slate-700 rounded-xl px-2.5 py-1 text-slate-300 font-semibold text-xs outline-none focus:border-emerald-500"
+                  >
+                    {notebooks.map(nb => (
+                      <option key={nb} value={nb}>{nb}</option>
+                    ))}
+                  </select>
+
+                  {/* Color Palette Picker */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsColorPickerOpen(prev => !prev)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border transition ${currentColorConfig.bg} ${currentColorConfig.text} ${currentColorConfig.border}`}
+                    >
+                      <span>{currentColorConfig.name}</span>
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+
+                    {isColorPickerOpen && (
+                      <div className="absolute left-0 mt-2 p-2 bg-[#1E293B] border border-slate-700 rounded-2xl shadow-xl flex gap-1.5 z-50 animate-in fade-in">
+                        {NOTE_COLORS.map(c => (
+                          <button
+                            key={c.id}
+                            onClick={() => {
+                              handleContentChange('color', c.id);
+                              setIsColorPickerOpen(false);
+                            }}
+                            className={`w-6 h-6 rounded-full border ${c.bg} ${c.border} hover:scale-110 transition shadow-xs`}
+                            title={c.name}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {isSaving && (
+                    <span className="text-[10px] text-emerald-400 font-mono animate-pulse">
+                      Saving...
+                    </span>
                   )}
                 </div>
-              )}
+
+                {/* Right Note Actions: Promote to Task, Pin, Star, Delete */}
+                <div className="flex items-center gap-2">
+                  
+                  {/* Promote to Task */}
+                  {selectedNote && onOpenAssignModal && (
+                    <button
+                      onClick={() => handlePromoteToTask(selectedNote)}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-bold border border-emerald-500/30 transition cursor-pointer"
+                      title="Convert this note to official company assigned task"
+                    >
+                      <Send className="w-3 h-3" />
+                      <span className="hidden sm:inline">Assign as Task</span>
+                    </button>
+                  )}
+
+                  {selectedNote && (
+                    <>
+                      <button
+                        onClick={(e) => handleTogglePin(selectedNote, e)}
+                        className={`p-1.5 rounded-xl border transition cursor-pointer ${
+                          selectedNote.pinned 
+                            ? 'bg-amber-500/20 border-amber-500/40 text-amber-300' 
+                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Pin Note"
+                      >
+                        <Pin className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={(e) => handleToggleStar(selectedNote, e)}
+                        className={`p-1.5 rounded-xl border transition cursor-pointer ${
+                          selectedNote.starred 
+                            ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 fill-amber-300' 
+                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Star Note"
+                      >
+                        <Star className={`w-3.5 h-3.5 ${selectedNote.starred ? 'fill-current' : ''}`} />
+                      </button>
+
+                      <button
+                        onClick={(e) => handleDeleteNote(selectedNote.id, e)}
+                        className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 transition cursor-pointer"
+                        title="Delete Note"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
+
+                  {/* Manual Save button if new */}
+                  {!selectedNote && (
+                    <button
+                      onClick={handleSaveNote}
+                      className="px-4 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition"
+                    >
+                      Save Note
+                    </button>
+                  )}
+                </div>
+
+              </div>
+
+              {/* Note Content Area */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 max-w-3xl mx-auto w-full no-scrollbar">
+                
+                {/* Note Title Input */}
+                <input
+                  type="text"
+                  placeholder="Note Title..."
+                  value={editorTitle}
+                  onChange={(e) => handleContentChange('title', e.target.value)}
+                  className="w-full bg-transparent text-xl font-bold text-slate-100 placeholder-slate-600 outline-none border-b border-slate-800 pb-2 focus:border-emerald-500 transition"
+                />
+
+                {/* Note Body Textarea */}
+                <textarea
+                  rows="7"
+                  placeholder="Start typing your thoughts, instructions, or meeting highlights..."
+                  value={editorContent}
+                  onChange={(e) => handleContentChange('content', e.target.value)}
+                  className="w-full bg-transparent text-xs text-slate-300 placeholder-slate-600 outline-none resize-none leading-relaxed focus:ring-0 border-0"
+                />
+
+                {/* Checklist Section */}
+                <div className="space-y-2 pt-3 border-t border-slate-800">
+                  <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+                    <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Checklist Items</span>
+                  </span>
+
+                  {/* Existing Checklist */}
+                  <div className="space-y-1.5">
+                    {editorChecklist.map(item => (
+                      <div key={item.id} className="flex items-center justify-between gap-2 p-2 bg-[#1E293B] rounded-xl border border-slate-700 text-xs">
+                        <div 
+                          onClick={() => handleToggleChecklistItem(item.id)}
+                          className="flex items-center gap-2 flex-1 cursor-pointer truncate"
+                        >
+                          {item.done ? (
+                            <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-500 shrink-0" />
+                          )}
+                          <span className={`truncate ${item.done ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                            {item.text}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveChecklistItem(item.id)}
+                          className="text-slate-500 hover:text-rose-400 text-xs px-1"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add New Checklist Item Input */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      placeholder="Add an actionable to-do item..."
+                      value={editorNewChecklistText}
+                      onChange={(e) => setEditorNewChecklistText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddChecklistItem(); }}
+                      className="flex-1 bg-[#1E293B] border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddChecklistItem}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tags Pill Row */}
+                <div className="pt-3 border-t border-slate-800 space-y-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Tag className="w-3.5 h-3.5 text-slate-400" />
+                    {editorTags.map(t => (
+                      <span key={t} className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 text-[10px] font-mono border border-slate-700 flex items-center gap-1">
+                        #{t}
+                        <button 
+                          onClick={() => setEditorTags(editorTags.filter(tag => tag !== t))}
+                          className="text-slate-500 hover:text-rose-400"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                    
+                    <input
+                      type="text"
+                      placeholder="+ tag"
+                      value={newTagInput}
+                      onChange={(e) => setNewTagInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddTag(); }}
+                      className="w-20 bg-transparent text-[10px] text-slate-300 placeholder-slate-600 outline-none px-1"
+                    />
+                  </div>
+                </div>
+
+              </div>
 
             </div>
           )}
 
         </div>
 
-        {/* Reminders Panel (Right column on desktop, below on mobile) */}
-        <div className="space-y-4">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Bell className="w-4 h-4 text-emerald-700" />
-                <h3 className="text-sm font-bold text-slate-900">Upcoming Reminders</h3>
-              </div>
-              <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
-                Active
-              </span>
-            </div>
-
-            {/* Today's Reminders */}
-            <div>
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Today</p>
-              {remindersPanelItems.today.length === 0 ? (
-                <p className="text-xs text-slate-400 py-2">No alarms scheduled for today</p>
-              ) : (
-                <div className="space-y-2">
-                  {remindersPanelItems.today.map(t => (
-                    <div 
-                      key={t.id}
-                      onClick={() => openEditModal(t)}
-                      className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-100 cursor-pointer transition flex items-center justify-between text-xs"
-                    >
-                      <div className="truncate mr-2">
-                        <p className="font-semibold text-slate-800 truncate">{t.title}</p>
-                        <p className="text-[11px] text-emerald-700 font-medium mt-0.5">
-                          {formatDisplayTime(t.remindAtDate)}
-                        </p>
-                      </div>
-                      <Bell className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Tomorrow's Reminders */}
-            <div className="pt-2 border-t border-slate-100">
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tomorrow</p>
-              {remindersPanelItems.tomorrow.length === 0 ? (
-                <p className="text-xs text-slate-400 py-2">No alarms scheduled for tomorrow</p>
-              ) : (
-                <div className="space-y-2">
-                  {remindersPanelItems.tomorrow.map(t => (
-                    <div 
-                      key={t.id}
-                      onClick={() => openEditModal(t)}
-                      className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-100 cursor-pointer transition flex items-center justify-between text-xs"
-                    >
-                      <div className="truncate mr-2">
-                        <p className="font-semibold text-slate-800 truncate">{t.title}</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {formatDisplayTime(t.remindAtDate)}
-                        </p>
-                      </div>
-                      <Bell className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-          </div>
-        </div>
-
       </div>
 
-      {/* 5. Add / Edit Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
-            
-            {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-[#05331F] flex items-center justify-center font-bold">
-                  <CheckSquare className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    {editingTodo ? 'Edit Personal To-Do' : 'New Personal To-Do'}
-                  </h3>
-                  <p className="text-xs text-slate-500">Private item on your schedule</p>
-                </div>
-              </div>
+      {/* ========================================================
+          NEW NOTEBOOK MODAL
+         ======================================================== */}
+      {isNewNotebookModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#1E293B] border border-slate-700 rounded-3xl p-5 max-w-sm w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <FolderPlus className="w-4 h-4 text-emerald-400" />
+                <span>Create New Notebook</span>
+              </h3>
               <button 
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                onClick={() => setIsNewNotebookModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200"
               >
-                <X className="w-5 h-5" />
+                ✕
               </button>
             </div>
 
-            {/* Modal Form */}
-            <form onSubmit={handleModalSave} className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 text-xs">
-              
-              {modalError && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{modalError}</span>
-                </div>
-              )}
+            <input
+              type="text"
+              placeholder="e.g. Dealer Follow-ups, Swarnam..."
+              value={newNotebookName}
+              onChange={(e) => setNewNotebookName(e.target.value)}
+              className="w-full bg-[#0F172A] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-emerald-500"
+            />
 
-              {/* Title */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Title *</label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="e.g. Follow up on factory assembly line maintenance"
-                  value={modalTitle}
-                  onChange={(e) => setModalTitle(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:outline-none focus:border-[#05331F]"
-                />
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Notes / Checklist</label>
-                <textarea
-                  rows="3"
-                  placeholder="Optional details, contact points or action items..."
-                  value={modalNotes}
-                  onChange={(e) => setModalNotes(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:outline-none focus:border-[#05331F]"
-                />
-              </div>
-
-              {/* Due Date & Time */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Due Date</label>
-                  <input
-                    type="date"
-                    value={modalDueDate}
-                    onChange={(e) => setModalDueDate(e.target.value)}
-                    className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:outline-none focus:border-[#05331F]"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Due Time</label>
-                  <input
-                    type="time"
-                    value={modalDueTime}
-                    onChange={(e) => setModalDueTime(e.target.value)}
-                    className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:outline-none focus:border-[#05331F]"
-                  />
-                </div>
-              </div>
-
-              {/* Reminder & Priority */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Alarm Reminder</label>
-                  <select
-                    value={modalReminder}
-                    onChange={(e) => setModalReminder(e.target.value)}
-                    className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50 font-medium text-slate-700 focus:outline-none focus:border-[#05331F]"
-                  >
-                    {REMINDER_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Priority</label>
-                  <select
-                    value={modalPriority}
-                    onChange={(e) => setModalPriority(e.target.value)}
-                    className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50 font-medium text-slate-700 focus:outline-none focus:border-[#05331F]"
-                  >
-                    <option value={PRIORITIES.LOW}>Low</option>
-                    <option value={PRIORITIES.MEDIUM}>Medium</option>
-                    <option value={PRIORITIES.HIGH}>High</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Repeat recurrence */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Recurrence</label>
-                <select
-                  value={modalRepeat}
-                  onChange={(e) => setModalRepeat(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50 font-medium text-slate-700 focus:outline-none focus:border-[#05331F]"
-                >
-                  {REPEAT_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Modal Actions */}
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={modalSubmitting}
-                  className="px-5 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white font-semibold shadow-2xs transition flex items-center gap-1.5"
-                >
-                  {modalSubmitting ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <span>{editingTodo ? 'Save Changes' : 'Create To-Do'}</span>
-                  )}
-                </button>
-              </div>
-
-            </form>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setIsNewNotebookModalOpen(false)}
+                className="px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newNotebookName.trim()) {
+                    setNotebooks(prev => [...prev, newNotebookName.trim()]);
+                    setActiveNotebook(newNotebookName.trim());
+                    setNewNotebookName('');
+                    setIsNewNotebookModalOpen(false);
+                  }
+                }}
+                className="px-4 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md"
+              >
+                Create Notebook
+              </button>
+            </div>
           </div>
         </div>
       )}

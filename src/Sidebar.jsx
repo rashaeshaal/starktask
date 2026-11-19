@@ -4,7 +4,7 @@ import {
   Users, Layers, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   Settings, LogOut, ChevronLeft, ChevronRight, X, Shield, 
   Calendar, RefreshCw, UserCheck, CheckSquare, Briefcase,
-  TrendingUp, Award, FileText, Check, Package
+  TrendingUp, Award, FileText, Check, Package, BookOpen
 } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { getScope, canAccess, SCOPES, PAGES } from './permissions';
@@ -300,11 +300,11 @@ export default function Sidebar({
                 </button>
               )}
 
-              {/* To-Do & Reminders */}
+              {/* Notes & Notebooks (Zoho Cliq style) */}
               {canSeeTodos && (
                 <button
                   onClick={() => handleNavClick('todos')}
-                  title={isCollapsed ? 'To-Do & Reminders' : ''}
+                  title={isCollapsed ? 'Notes & Notebook' : ''}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
                     activeTab === 'todos'
                       ? 'bg-[#0d4a2d] text-white shadow-xs'
@@ -312,8 +312,8 @@ export default function Sidebar({
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <Clock className="w-4 h-4 shrink-0 text-emerald-400" />
-                    {!isCollapsed && <span>To-Do & Reminders</span>}
+                    <BookOpen className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>Notes & Notebook</span>}
                   </div>
                   {!isCollapsed && dueRemindersCount > 0 && (
                     <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
