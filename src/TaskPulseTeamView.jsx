@@ -81,7 +81,8 @@ export default function TaskPulseTeamView({
 }) {
   const todayStr = getTodayDateString();
   const userRole = currentUser?.role || '';
-  const currentUserId = currentUser?.id || currentUser?.uid;
+  const currentUserId = String(currentUser?.id || currentUser?.uid || currentUser?.employeeId || '');
+  const currentUserEmpId = String(currentUser?.employeeId || '');
 
   const isBrandManager = userRole === 'Brand Manager';
   const isOperationsHead = userRole === 'Operations Head';
@@ -183,9 +184,10 @@ export default function TaskPulseTeamView({
         if (!isReq) return false;
       } else {
         // Standard My Tasks view
-        const taskAssigneeId = task.assignedToId || task.assignedTo;
-        const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds : [];
-        const isMine = taskAssigneeId === currentUserId || taskAssigneeIds.includes(currentUserId);
+        const taskAssigneeId = String(task.assignedToId || task.assignedTo || '');
+        const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds.map(String) : [];
+        const isMine = (currentUserId && (taskAssigneeId === currentUserId || taskAssigneeIds.includes(currentUserId))) ||
+                       (currentUserEmpId && (taskAssigneeId === currentUserEmpId || taskAssigneeIds.includes(currentUserEmpId)));
         if (!isMine) return false;
       }
 
@@ -247,14 +249,15 @@ export default function TaskPulseTeamView({
 
   const todayCount = useMemo(() => {
     return tasks.filter(task => {
-      const taskAssigneeId = task.assignedToId || task.assignedTo;
-      const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds : [];
-      const isMine = taskAssigneeId === currentUserId || taskAssigneeIds.includes(currentUserId);
+      const taskAssigneeId = String(task.assignedToId || task.assignedTo || '');
+      const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds.map(String) : [];
+      const isMine = (currentUserId && (taskAssigneeId === currentUserId || taskAssigneeIds.includes(currentUserId))) ||
+                     (currentUserEmpId && (taskAssigneeId === currentUserEmpId || taskAssigneeIds.includes(currentUserEmpId)));
       if (!isMine) return false;
       const taskDateVal = task.date || task.taskDate || task.deadlineDate;
       return taskDateVal === todayStr || task.deadlineDate === todayStr;
     }).length;
-  }, [tasks, currentUserId, todayStr]);
+  }, [tasks, currentUserId, currentUserEmpId, todayStr]);
 
   const subtitleCountText = useMemo(() => {
     if (viewMode === 'sales_linked') {
@@ -828,6 +831,12 @@ export default function TaskPulseTeamView({
                               </div>
                             )}
                             <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5 flex-wrap">
+                              {task.assignedByName && task.assignedById !== currentUserId && (
+                                <span className="bg-emerald-50 text-[#05331F] border border-emerald-200/80 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                                  <span>Assigned by:</span>
+                                  <strong className="text-emerald-950 font-bold">{task.assignedByName}</strong>
+                                </span>
+                              )}
                               {task.reference && <span>Ref: <strong className="text-slate-600">{task.reference}</strong></span>}
                               {task.dealerName && <span>Dealer: <strong className="text-slate-600">{task.dealerName}</strong></span>}
                               {task.yesterdayLateReason && (
@@ -1003,6 +1012,12 @@ export default function TaskPulseTeamView({
                             </p>
                           )}
                           <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1 flex-wrap">
+                            {task.assignedByName && task.assignedById !== currentUserId && (
+                              <span className="bg-emerald-50 text-[#05331F] border border-emerald-200/80 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                                <span>Assigned by:</span>
+                                <strong className="text-emerald-950 font-bold">{task.assignedByName}</strong>
+                              </span>
+                            )}
                             {task.reference && <span>Ref: <strong>{task.reference}</strong></span>}
                             {task.location && <span>Loc: <strong>{task.location}</strong></span>}
                             {task.yesterdayLateReason && (
