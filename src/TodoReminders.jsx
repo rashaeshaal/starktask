@@ -14,6 +14,7 @@ import {
   onSnapshot, query, where, serverTimestamp, Timestamp 
 } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
+import { useToast } from './ToastContext';
 
 // Zoho Cliq Inspired Vibrant Sticky Note Colors
 export const NOTE_COLORS = [
@@ -33,6 +34,7 @@ export default function TodoReminders({
   onOpenTaskDetails
 }) {
   const { currentUser: authUser, userProfile } = useAuth();
+  const { showToast, confirm } = useToast();
   const effectiveUser = propUser || userProfile || authUser;
   const uid = effectiveUser?.uid || effectiveUser?.id || authUser?.uid || null;
 
@@ -271,14 +273,23 @@ export default function TodoReminders({
   // Delete Note
   const handleDeleteNote = async (noteId, e) => {
     e?.stopPropagation();
-    if (!confirm('Are you sure you want to delete this note?')) return;
+    const confirmed = await confirm({
+      title: 'Delete Note',
+      message: 'Are you sure you want to delete this note? This action cannot be undone.',
+      confirmText: 'Delete Note',
+      type: 'danger'
+    });
+    if (!confirmed) return;
+
     try {
       await deleteDoc(doc(db, 'todos', noteId));
       if (selectedNote?.id === noteId) {
         setSelectedNote(null);
       }
+      showToast('Note deleted successfully', 'success');
     } catch (err) {
       console.error('Error deleting note:', err);
+      showToast('Failed to delete note: ' + err.message, 'error');
     }
   };
 

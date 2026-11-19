@@ -14,6 +14,7 @@ import EditDesignationModal from './EditDesignationModal';
 import EditDepartmentModal from './EditDepartmentModal';
 import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
+import { useToast } from './ToastContext';
 
 export default function OrganizationManagementView({ 
   departments = [], 
@@ -53,13 +54,8 @@ export default function OrganizationManagementView({
   const [isImporting, setIsImporting] = useState(false);
   const [importedCredentialsSheet, setImportedCredentialsSheet] = useState(null);
 
-  // Toast notification
-  const [toast, setToast] = useState(null);
-
-  const showToast = (text, type = 'success') => {
-    setToast({ text, type });
-    setTimeout(() => setToast(null), 3500);
-  };
+  // Modern Toast Context
+  const { showToast, confirm } = useToast();
 
   const isHR = canManageEmployees(currentUser);
   const canManageOrg = canManageOrgStructure(currentUser);
@@ -138,9 +134,13 @@ export default function OrganizationManagementView({
     const curStatus = emp.status || emp.employmentStatus || 'active';
     const nextStatus = curStatus === 'active' ? 'inactive' : 'active';
 
-    if (!confirm(`Are you sure you want to ${nextStatus === 'inactive' ? 'deactivate' : 'activate'} ${emp.fullName || emp.name}?`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: `${nextStatus === 'inactive' ? 'Deactivate' : 'Activate'} Employee`,
+      message: `Are you sure you want to ${nextStatus === 'inactive' ? 'deactivate' : 'activate'} ${emp.fullName || emp.name}?`,
+      confirmText: nextStatus === 'inactive' ? 'Deactivate' : 'Activate',
+      type: nextStatus === 'inactive' ? 'danger' : 'info'
+    });
+    if (!confirmed) return;
 
     try {
       await apiSetEmployeeStatus({ uid: emp.id, status: nextStatus });
@@ -148,10 +148,10 @@ export default function OrganizationManagementView({
       if (onEmployeeUpdated) {
         onEmployeeUpdated({ ...emp, status: nextStatus, employmentStatus: nextStatus });
       }
-      showToast(`Employee ${nextStatus === 'inactive' ? 'deactivated' : 'activated'} successfully.`);
+      showToast(`Employee ${nextStatus === 'inactive' ? 'deactivated' : 'activated'} successfully.`, 'success');
     } catch (err) {
       console.error('Status toggle error:', err);
-      alert(err.message || 'Failed to update employee status.');
+      showToast(err.message || 'Failed to update employee status.', 'error');
     }
   };
 
@@ -161,7 +161,7 @@ export default function OrganizationManagementView({
     const newPwd = prompt(`Enter new password for ${emp.fullName || emp.name} (min 8 chars):`);
     if (!newPwd) return;
     if (newPwd.length < 8) {
-      alert('Password must be at least 8 characters long.');
+      showToast('Password must be at least 8 characters long.', 'warning');
       return;
     }
 
@@ -171,38 +171,42 @@ export default function OrganizationManagementView({
         newPassword: newPwd,
         requirePasswordChange: true
       });
-      showToast('Password reset successfully. User must change it on login.');
+      showToast('Password reset successfully. User must change it on login.', 'success');
     } catch (err) {
       console.error('Reset password error:', err);
-      alert(err.message || 'Failed to reset password.');
+      showToast(err.message || 'Failed to reset password.', 'error');
     }
   };
 
   // Save / Update Department in Firestore
   const handleSaveDepartment = async (deptData) => {
     await setDoc(doc(db, 'departments', deptData.id), deptData, { merge: true });
-    showToast(`Department "${deptData.name}" saved successfully.`);
+    showToast(`Department "${deptData.name}" saved successfully.`, 'success');
   };
 
   // Archive Department (A department with active employees cannot be deleted, only archived)
   const handleArchiveDepartment = async (dept) => {
     const memberCount = employees.filter(e => (e.department || e.departmentId || '').toLowerCase() === dept.id.toLowerCase()).length;
     if (memberCount > 0 && dept.status !== 'archived') {
-      if (!confirm(`"${dept.name}" has ${memberCount} assigned employees. It cannot be deleted, but it will be archived. Proceed?`)) {
-        return;
-      }
+      const confirmed = await confirm({
+        title: 'Archive Department',
+        message: `"${dept.name}" has ${memberCount} assigned employees. It cannot be deleted, but it will be archived. Proceed?`,
+        confirmText: 'Archive Department',
+        type: 'warning'
+      });
+      if (!confirmed) return;
     }
 
     const nextStatus = dept.status === 'archived' ? 'active' : 'archived';
     await updateDoc(doc(db, 'departments', dept.id), { status: nextStatus });
-    showToast(`Department "${dept.name}" ${nextStatus === 'archived' ? 'archived' : 'activated'}.`);
+    showToast(`Department "${dept.name}" ${nextStatus === 'archived' ? 'archived' : 'activated'}.`, 'success');
   };
 
   // Save / Update Designation in Firestore
   const handleSaveDesignation = async (desData) => {
     await setDoc(doc(db, 'designations', desData.id), desData, { merge: true });
     if (onDesignationUpdated) onDesignationUpdated(desData);
-    showToast(`Designation "${desData.title}" saved successfully.`);
+    showToast(`Designation "${desData.title}" saved successfully.`, 'success');
   };
 
   // Excel / CSV File Read & Validation
@@ -330,24 +334,6 @@ export default function OrganizationManagementView({
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12 font-sans select-none">
       
-      {/* Toast Alert */}
-      {toast && (
-        <div 
-          className={`fixed top-4 right-4 z-50 p-3.5 rounded-2xl shadow-lg border text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-3 ${
-            toast.type === 'success' 
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
-              : 'bg-rose-50 border-rose-200 text-rose-900'
-          }`}
-        >
-          {toast.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" />
-          ) : (
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-          )}
-          <span>{toast.text}</span>
-        </div>
-      )}
-
       {/* Top Header Card */}
       <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

@@ -8,6 +8,7 @@ import {
 import { canAccessSales, getSalesScope, filterDealersByScope } from './salesPermissions';
 import { saveDealerRecord } from './firestoreService';
 import { canViewAll, isGlobalManager } from './permissions';
+import { useToast } from './ToastContext';
 
 export default function DealersDirectoryView({ 
   currentUser, 
@@ -18,6 +19,7 @@ export default function DealersDirectoryView({
   onNavigateToTab
 }) {
   // 1. Access Restriction Check
+  const { showToast } = useToast();
   const hasAccess = canAccessSales(currentUser);
   if (!hasAccess) {
     return (
@@ -170,9 +172,10 @@ export default function DealersDirectoryView({
 
       setSelectedDealer(prev => prev ? { ...prev, assignedStaff: reassignTargetStaff, assignedTo: reassignTargetStaff } : null);
       setIsReassignModalOpen(false);
+      showToast('Dealer reassigned successfully!', 'success');
     } catch (err) {
       console.error('Failed to reassign dealer:', err);
-      alert('Error reassigning dealer');
+      showToast('Error reassigning dealer: ' + err.message, 'error');
     } finally {
       setIsReassigning(false);
     }

@@ -11,6 +11,7 @@ import AddTodayWorkModal from './AddTodayWorkModal';
 import { updateFirestoreTask } from './firestoreService';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from './firebase';
+import { useToast } from './ToastContext';
 
 /**
  * Clean Date Formatter:
@@ -119,7 +120,7 @@ export default function TaskPulseTeamView({
 
   // Modal State: "Add Today's Work"
   const [isAddTodayWorkModalOpen, setIsAddTodayWorkModalOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState(null);
+  const { showToast, confirm } = useToast();
 
   // Photo viewer lightbox
   const [activePhotoViewer, setActivePhotoViewer] = useState(null);
@@ -140,13 +141,6 @@ export default function TaskPulseTeamView({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const showToast = (text, type = 'success') => {
-    setToastMessage({ text, type });
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3500);
-  };
 
   // 1. Linked tasks from Sales (For Warehouse In-charge, Transport Manager & Finance)
   const salesLinkedTasks = useMemo(() => {
@@ -336,11 +330,17 @@ export default function TaskPulseTeamView({
       return;
     }
 
-    if (!window.confirm(`Delete "${task.title}"?`)) return;
+    const confirmed = await confirm({
+      title: 'Delete Task',
+      message: `Are you sure you want to delete "${task.title}"? This cannot be undone.`,
+      confirmText: 'Delete Task',
+      type: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
       await deleteDoc(doc(db, 'tasks', task.id));
-      showToast('Task deleted successfully');
+      showToast('Task deleted successfully', 'success');
     } catch (err) {
       console.error('Delete error:', err);
       showToast('Failed to delete task', 'error');
@@ -506,30 +506,6 @@ export default function TaskPulseTeamView({
   return (
     <>
       <div className="space-y-4">
-        
-        {/* Toast Notification */}
-        {toastMessage && (
-          <div 
-            className={`fixed top-4 right-4 z-50 p-3.5 rounded-2xl shadow-lg border text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-3 ${
-              toastMessage.type === 'success' 
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
-                : 'bg-rose-50 border-rose-200 text-rose-900'
-            }`}
-          >
-            {toastMessage.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            )}
-            <span>{toastMessage.text}</span>
-            <button 
-              onClick={() => setToastMessage(null)}
-              className="p-1 rounded-lg hover:bg-black/5 ml-2 min-h-[36px] min-w-[36px] flex items-center justify-center"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
 
         {/* 1. PAGE HEADER */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
