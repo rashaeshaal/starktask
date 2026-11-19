@@ -420,23 +420,34 @@ export default function TaskPulseTeamView({
     const taskObj = typeof task === 'object' ? task : null;
     const locked = taskObj ? isTaskLockedForUser(currentUser, taskObj) : false;
 
-    // Badge styling helpers
-    let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+    // Rich badge styling and color configurations
+    let badgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
+    let dotClass = 'bg-slate-400';
+
     if (s === TASK_STATUSES.COMPLETED || s === 'Completed') {
-      badgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+      badgeClass = 'bg-emerald-100/90 text-emerald-800 border-emerald-300 shadow-xs hover:bg-emerald-200/80';
+      dotClass = 'bg-emerald-500';
     } else if (s === TASK_STATUSES.PENDING_REVIEW || s === 'Pending Review' || s === 'In Review') {
-      badgeClass = 'bg-blue-50 text-blue-800 border-blue-200';
+      badgeClass = 'bg-indigo-100/90 text-indigo-800 border-indigo-300 shadow-xs hover:bg-indigo-200/80';
+      dotClass = 'bg-indigo-500';
     } else if (s === 'Correction Requested' || s === 'Changes Requested') {
-      badgeClass = 'bg-amber-50 text-amber-800 border-amber-300';
+      badgeClass = 'bg-amber-100/90 text-amber-900 border-amber-300 shadow-xs hover:bg-amber-200/80';
+      dotClass = 'bg-amber-500';
     } else if (s === TASK_STATUSES.BLOCKED || s === 'Blocked' || s === 'Payment Hold') {
-      badgeClass = 'bg-rose-50 text-rose-800 border-rose-200';
+      badgeClass = 'bg-rose-100/90 text-rose-800 border-rose-300 shadow-xs hover:bg-rose-200/80';
+      dotClass = 'bg-rose-500';
     } else if (s === TASK_STATUSES.IN_PROGRESS || s === 'In Progress') {
-      badgeClass = 'bg-sky-50 text-sky-800 border-sky-200';
+      badgeClass = 'bg-cyan-100/90 text-cyan-900 border-cyan-300 shadow-xs hover:bg-cyan-200/80';
+      dotClass = 'bg-cyan-600 animate-pulse';
+    } else if (s === TASK_STATUSES.ASSIGNED || s === 'Assigned' || s === 'Pending') {
+      badgeClass = 'bg-amber-50 text-amber-800 border-amber-200 shadow-xs hover:bg-amber-100/80';
+      dotClass = 'bg-amber-400';
     }
 
     if (!taskObj || locked) {
       return (
-        <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${badgeClass}`}>
+        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border transition-colors ${badgeClass}`}>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
           {s === TASK_STATUSES.PENDING_REVIEW ? 'In review' : s === 'Correction Requested' ? 'Changes requested' : s}
         </span>
       );
@@ -444,7 +455,7 @@ export default function TaskPulseTeamView({
 
     return (
       <div 
-        className="relative inline-block" 
+        className="relative inline-flex items-center" 
         onClick={(e) => {
           e.stopPropagation();
         }}
@@ -452,19 +463,20 @@ export default function TaskPulseTeamView({
           e.stopPropagation();
         }}
       >
+        <span className={`absolute left-2.5 pointer-events-none w-1.5 h-1.5 rounded-full shrink-0 z-10 ${dotClass}`} />
         <select
           value={s}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
           onChange={(e) => handleStatusChange(taskObj, e.target.value, e)}
-          className={`appearance-none text-[11px] font-semibold rounded-full pl-2.5 pr-6 py-1 border cursor-pointer focus:outline-none transition-shadow shadow-2xs ${badgeClass}`}
+          className={`appearance-none text-[11px] font-bold rounded-full pl-6 pr-6 py-1 border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-slate-400 transition-all font-medium ${badgeClass}`}
         >
-          <option value={TASK_STATUSES.ASSIGNED}>Pending</option>
-          <option value={TASK_STATUSES.IN_PROGRESS}>In Progress</option>
-          <option value={TASK_STATUSES.PENDING_REVIEW}>In Review / Sign-Off</option>
-          <option value={TASK_STATUSES.COMPLETED}>Completed</option>
-          <option value={TASK_STATUSES.BLOCKED}>Blocked</option>
-          <option value="Changes Requested">Changes Requested</option>
+          <option value={TASK_STATUSES.ASSIGNED} className="bg-white text-slate-800 font-semibold">Pending</option>
+          <option value={TASK_STATUSES.IN_PROGRESS} className="bg-white text-cyan-800 font-semibold">In Progress</option>
+          <option value={TASK_STATUSES.PENDING_REVIEW} className="bg-white text-indigo-800 font-semibold">In Review / Sign-Off</option>
+          <option value={TASK_STATUSES.COMPLETED} className="bg-white text-emerald-800 font-semibold">Completed</option>
+          <option value={TASK_STATUSES.BLOCKED} className="bg-white text-rose-800 font-semibold">Blocked</option>
+          <option value="Changes Requested" className="bg-white text-amber-800 font-semibold">Changes Requested</option>
         </select>
         <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] opacity-70">
           ▼
