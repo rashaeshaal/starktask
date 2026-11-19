@@ -26,6 +26,7 @@ import {
   getRoleLevel,
   getDownlineRoles
 } from './orgTree';
+import { useToast } from './ToastContext';
 
 /**
  * TeamManagementView (My Team & Operational Workgroups)
@@ -60,6 +61,7 @@ export default function TeamManagementView({
   onTeamUpdated,
   onTeamMembersUpdated
 }) {
+  const { showToast, confirm } = useToast();
   // Navigation tabs: 'teams' (Team Cards) vs 'org_chart' (Company Org Chart)
   const [activeViewTab, setActiveViewTab] = useState('teams');
 
@@ -316,25 +318,42 @@ export default function TeamManagementView({
 
   // Delete / Toggle Status
   const handleDeleteTeam = async (team) => {
-    if (!confirm(`Are you sure you want to deactivate "${team.name}"?`)) return;
+    const isActivating = team.status !== 'active';
+    const confirmed = await confirm({
+      title: isActivating ? 'Activate Team' : 'Deactivate Team',
+      message: `Are you sure you want to ${isActivating ? 'activate' : 'deactivate'} "${team.name}"?`,
+      confirmText: isActivating ? 'Activate' : 'Deactivate',
+      type: isActivating ? 'info' : 'danger'
+    });
+    if (!confirmed) return;
+
     try {
-      await updateTeam(team.id, { status: team.status === 'active' ? 'inactive' : 'active' }, currentUser);
-      if (onTeamUpdated) onTeamUpdated({ ...team, status: team.status === 'active' ? 'inactive' : 'active' });
+      await updateTeam(team.id, { status: isActivating ? 'active' : 'inactive' }, currentUser);
+      if (onTeamUpdated) onTeamUpdated({ ...team, status: isActivating ? 'active' : 'inactive' });
+      showToast(`Team "${team.name}" ${isActivating ? 'activated' : 'deactivated'} successfully.`, 'success');
     } catch (err) {
-      alert(err.message);
+      showToast('Error: ' + err.message, 'error');
     }
   };
 
   // Remove Member
   const handleRemoveMember = async (teamId, userId) => {
-    if (!confirm('Remove this member from the team?')) return;
+    const confirmed = await confirm({
+      title: 'Remove Squad Member',
+      message: 'Are you sure you want to remove this member from the squad?',
+      confirmText: 'Remove Member',
+      type: 'danger'
+    });
+    if (!confirmed) return;
+
     try {
       await removeTeamMember(teamId, userId);
       if (onTeamMembersUpdated) {
         onTeamMembersUpdated(teamMembers.filter(m => !(m.teamId === teamId && (m.userId === userId || m.uid === userId))));
       }
+      showToast('Member removed from squad successfully.', 'success');
     } catch (err) {
-      alert(err.message);
+      showToast('Error: ' + err.message, 'error');
     }
   };
 

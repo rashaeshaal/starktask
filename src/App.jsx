@@ -48,6 +48,7 @@ import AddEmployeeModal from './AddEmployeeModal';
 import SopTemplatesView from './SopTemplatesView';
 import EscalationsView from './EscalationsView';
 import TodoReminders from './TodoReminders';
+import { useToast } from './ToastContext';
 import TeamPerformanceView from './TeamPerformanceView';
 import ReportsView from './ReportsView';
 import DealersDirectoryView from './DealersDirectoryView';
@@ -106,9 +107,9 @@ export default function App() {
   // Responsive Navigation State
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const { showToast } = useToast();
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState(null);
 
   // Quick Search (Ctrl+K)
   const [isQuickSearchOpen, setIsQuickSearchOpen] = useState(false);
@@ -133,8 +134,7 @@ export default function App() {
   // Route Guard Helper with Toast Notification
   const navigateToTabSafe = (targetTab, subFilter = null) => {
     if (!canAccess(activeEmployee, targetTab)) {
-      setToastMessage("You don't have access to that page.");
-      setTimeout(() => setToastMessage(null), 3500);
+      showToast("Access Restricted: You don't have permission to view that page.", "warning");
       setActiveTab('dashboard');
       return;
     }
@@ -145,8 +145,7 @@ export default function App() {
   // Route Guard check whenever activeTab or activeEmployee changes
   useEffect(() => {
     if (activeTab !== 'dashboard' && !canAccess(activeEmployee, activeTab)) {
-      setToastMessage("You don't have access to that page.");
-      setTimeout(() => setToastMessage(null), 3500);
+      showToast("Access Restricted: You don't have permission to view that page.", "warning");
       setActiveTab('dashboard');
     }
   }, [activeTab, activeEmployee]);
@@ -312,18 +311,20 @@ export default function App() {
   const handleTaskCreated = async (newTaskData) => {
     try {
       await createFirestoreTask(newTaskData, activeEmployee);
+      showToast('Task created and assigned successfully!', 'success');
     } catch (err) {
       console.error('Failed to create task in Firestore:', err);
-      alert('Error creating task: ' + err.message);
+      showToast('Error creating task: ' + err.message, 'error');
     }
   };
 
   const handleTaskUpdated = async (updatedTask) => {
     try {
       await updateFirestoreTask(updatedTask.id, updatedTask, activeEmployee);
+      showToast('Task updated successfully!', 'success');
     } catch (err) {
       console.error('Failed to update task in Firestore:', err);
-      alert('Error updating task: ' + err.message);
+      showToast('Error updating task: ' + err.message, 'error');
     }
   };
 
@@ -347,8 +348,10 @@ export default function App() {
         reminded: false,
         createdAt: serverTimestamp()
       });
+      showToast('Note added to your Notebook!', 'success');
     } catch (err) {
       console.error('Failed to quick add to-do:', err);
+      showToast('Failed to add note: ' + err.message, 'error');
     }
   };
 
@@ -382,9 +385,10 @@ export default function App() {
         createdAt: serverTimestamp()
       });
 
-      alert(`Follow-up added to your Personal Planner for "${task.title}"`);
+      showToast(`Follow-up saved to your Notebook for "${task.title}"`, 'success');
     } catch (err) {
       console.error('Failed to add follow-up to to-dos:', err);
+      showToast('Failed to add follow-up: ' + err.message, 'error');
     }
   };
 
@@ -410,14 +414,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-row">
-      
-      {/* Toast Notification Alert */}
-      {toastMessage && (
-        <div className="fixed top-4 right-4 z-50 bg-rose-900 text-white px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-2 text-xs font-semibold animate-in slide-in-from-top duration-200">
-          <AlertCircle className="w-4 h-4 text-rose-300 shrink-0" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
 
       {/* 1. Left Navigation Sidebar (In-flow fixed width column on desktop, NO double margin) */}
       <Sidebar
@@ -773,9 +769,9 @@ export default function App() {
                       lastNudgedAt: new Date().toISOString(),
                       lastNudgedBy: activeEmployee.fullName || activeEmployee.name
                     }, activeEmployee);
-                    alert('Nudge notification sent to assignee.');
+                    showToast('Nudge reminder sent to assignee successfully.', 'success');
                   } catch (e) {
-                    alert('Nudge failed: ' + e.message);
+                    showToast('Nudge failed: ' + e.message, 'error');
                   }
                 }}
                 onReassignTask={(task) => {
