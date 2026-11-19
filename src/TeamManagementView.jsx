@@ -10,7 +10,8 @@ import {
   updateTeam, 
   addTeamMembers, 
   removeTeamMember, 
-  transferTeamMember 
+  transferTeamMember,
+  syncTeamMembers
 } from './firestoreService';
 import { 
   canManageTeam, 
@@ -81,6 +82,7 @@ export default function TeamManagementView({
   const [teamLeaderId, setTeamLeaderId] = useState('');
   const [teamDescription, setTeamDescription] = useState('');
   const [selectedMemberIdsForTeam, setSelectedMemberIdsForTeam] = useState([]);
+  const [memberReportingMap, setMemberReportingMap] = useState({}); // { [memberId]: reportingLeadId }
   const [modalError, setModalError] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
 
@@ -177,6 +179,7 @@ export default function TeamManagementView({
     setTeamLeaderId('');
     setTeamDescription('');
     setSelectedMemberIdsForTeam([]);
+    setMemberReportingMap({});
     setIsCreateModalOpen(true);
   };
 
@@ -189,9 +192,18 @@ export default function TeamManagementView({
     setTeamLeaderId(team.leaderId || '');
     setTeamDescription(team.description || '');
 
-    // Existing team member IDs
+    // Existing team member IDs & reporting leads
     const curMembers = teamMembers.filter(m => m.teamId === team.id && m.status === 'active');
     setSelectedMemberIdsForTeam(curMembers.map(m => m.userId || m.employeeId));
+
+    const repMap = {};
+    curMembers.forEach(m => {
+      const mId = m.userId || m.employeeId;
+      if (m.reportingLeadId) {
+        repMap[mId] = m.reportingLeadId;
+      }
+    });
+    setMemberReportingMap(repMap);
   };
 
   // Live list of eligible leaders for the currently selected department in modal
@@ -238,6 +250,11 @@ export default function TeamManagementView({
     return employees.find(e => e.id === teamLeaderId || e.employeeId === teamLeaderId);
   }, [teamLeaderId, employees]);
 
+  // Selected member objects in current modal
+  const selectedMembersInModal = useMemo(() => {
+    return employees.filter(emp => selectedMemberIdsForTeam.includes(emp.id || emp.employeeId));
+  }, [selectedMemberIdsForTeam, employees]);
+
   // Submit Create or Edit Team with Strict Tree Placement Validation
   const handleSaveTeamSubmit = async (e) => {
     e.preventDefault();
@@ -283,29 +300,40 @@ export default function TeamManagementView({
       leaderId: teamLeaderId,
       leaderName: `${leaderObj.fullName || leaderObj.name} (${leaderObj.role})`,
       description: teamDescription.trim(),
-      members: selectedMembers.map(m => ({
-        id: m.id || m.employeeId,
-        userId: m.id || m.employeeId,
-        fullName: m.fullName || m.name,
-        role: m.role,
-        department: m.department || teamDept,
-        email: m.email
-      }))
+      members: selectedMembers.map(m => {
+        const mId = String(m.id || m.employeeId);
+        const repLeadId = memberReportingMap[mId] || teamLeaderId;
+        const repLeadObj = employees.find(e => String(e.id || e.employeeId) === String(repLeadId));
+        return {
+          id: mId,
+          userId: mId,
+          fullName: m.fullName || m.name,
+          role: m.role,
+          department: m.department || teamDept,
+          email: m.email,
+          reportingLeadId: repLeadId,
+          reportingLeadName: repLeadObj ? `${repLeadObj.fullName || repLeadObj.name} (${repLeadObj.role})` : null
+        };
+      })
     };
 
     try {
       if (editingTeam) {
         await updateTeam(editingTeam.id, teamPayload, currentUser);
+        // Dynamically sync team members collection
+        await syncTeamMembers(editingTeam.id, teamPayload.name, teamPayload.members, currentUser);
         if (onTeamUpdated) onTeamUpdated({ ...editingTeam, ...teamPayload });
+        showToast('Squad updated and members synced successfully!', 'success');
         setEditingTeam(null);
       } else {
         const createdId = await createTeam(teamPayload, currentUser);
         if (onTeamCreated) onTeamCreated({ ...teamPayload, id: createdId, memberCount: selectedMembers.length, status: 'active' });
         
         // Add members to teamMembers collection
-        if (selectedMembers.length > 0) {
-          await addTeamMembers(createdId, teamName.trim(), selectedMembers, currentUser);
+        if (teamPayload.members.length > 0) {
+          await syncTeamMembers(createdId, teamName.trim(), teamPayload.members, currentUser);
         }
+        showToast('Squad created successfully!', 'success');
         setIsCreateModalOpen(false);
       }
     } catch (err) {
@@ -540,9 +568,9 @@ export default function TeamManagementView({
                               // Indent based on role level relative to leader
                               const indentPx = Math.max(0, (memberLevel - 3) * 8);
 
-                              // Assign button visibility: strictly downline
+                              // Assign button visibility: strictly downline or team reportingLead
                               const targetEmp = employees.find(e => (e.id || e.employeeId) === memberUid) || m;
-                              const canAssignToThisMember = canUserAssignTo(currentUser, targetEmp, employees);
+                              const canAssignToThisMember = canUserAssignTo(currentUser, targetEmp, employees, teamMembers);
 
                               return (
                                 <div 
@@ -558,6 +586,11 @@ export default function TeamManagementView({
                                       </span>
                                     </div>
                                     <span className="text-[10px] text-slate-500 block truncate">{m.role}</span>
+                                    {m.reportingLeadName && (
+                                      <span className="text-[9px] text-emerald-800 font-medium block truncate">
+                                        Reports to: {m.reportingLeadName}
+                                      </span>
+                                    )}
                                   </div>
 
                                   <div className="flex items-center gap-1 shrink-0">
@@ -845,23 +878,61 @@ export default function TeamManagementView({
                           return (
                             <div 
                               key={empId}
-                              onClick={toggle}
-                              className={`flex items-center justify-between p-2 rounded-lg cursor-pointer text-xs select-none transition-all ${
+                              className={`p-2.5 rounded-xl border text-xs select-none transition-all space-y-2 ${
                                 isChecked 
-                                  ? 'bg-emerald-50 border border-emerald-300 font-bold text-emerald-950' 
-                                  : 'hover:bg-slate-50 text-slate-700'
+                                  ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950 font-semibold' 
+                                  : 'hover:bg-slate-50 border-slate-200 text-slate-700'
                               }`}
                             >
-                              <div className="flex items-center gap-2 truncate">
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  readOnly
-                                  className="rounded text-[#05331F] pointer-events-none"
-                                />
-                                <span className="truncate">{emp.fullName || emp.name}</span>
+                              <div 
+                                onClick={toggle}
+                                className="flex items-center justify-between cursor-pointer"
+                              >
+                                <div className="flex items-center gap-2 truncate">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    readOnly
+                                    className="rounded text-[#05331F] pointer-events-none"
+                                  />
+                                  <span className="truncate">{emp.fullName || emp.name}</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-normal">{emp.role}</span>
                               </div>
-                              <span className="text-[10px] text-slate-400 font-normal">{emp.role}</span>
+
+                              {/* Dynamic Direct Reporting Lead Selector (who assigns to whom in squad) */}
+                              {isChecked && (
+                                <div className="pl-6 pt-1 flex items-center gap-2 border-t border-emerald-200/60 text-[11px]">
+                                  <span className="text-slate-500 font-medium shrink-0">Direct Reporting Lead:</span>
+                                  <select
+                                    value={memberReportingMap[empId] || teamLeaderId}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      const newLeadId = e.target.value;
+                                      setMemberReportingMap(prev => ({
+                                        ...prev,
+                                        [empId]: newLeadId
+                                      }));
+                                    }}
+                                    className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-800 text-[11px] font-semibold outline-none focus:ring-1 focus:ring-[#05331F] flex-1 max-w-[220px]"
+                                  >
+                                    {selectedLeaderObj && (
+                                      <option value={selectedLeaderObj.id || selectedLeaderObj.employeeId}>
+                                        Team Lead: {selectedLeaderObj.fullName || selectedLeaderObj.name} ({selectedLeaderObj.role})
+                                      </option>
+                                    )}
+                                    {/* Other higher or equal level members selected in squad */}
+                                    {selectedMembersInModal
+                                      .filter(sm => (sm.id || sm.employeeId) !== empId)
+                                      .map(sm => (
+                                        <option key={sm.id || sm.employeeId} value={sm.id || sm.employeeId}>
+                                          Squad Sub-Lead: {sm.fullName || sm.name} ({sm.role})
+                                        </option>
+                                      ))
+                                    }
+                                  </select>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -894,25 +965,34 @@ export default function TeamManagementView({
                       <span className="text-slate-500 font-normal">({selectedLeaderObj.role})</span>
                     </div>
 
-                    {/* Member Nodes Indented */}
+                    {/* Member Nodes Indented by Reporting Lead */}
                     {selectedMemberIdsForTeam.map(mId => {
                       const emp = employees.find(e => (e.id || e.employeeId) === mId);
                       if (!emp) return null;
                       const lvl = getRoleLevel(emp.role);
-                      const indent = Math.max(1, lvl - getRoleLevel(selectedLeaderObj.role)) * 16;
+                      const repLeadId = memberReportingMap[mId] || teamLeaderId;
+                      const isSubLead = String(repLeadId) !== String(teamLeaderId);
+                      const repLeadObj = employees.find(e => String(e.id || e.employeeId) === String(repLeadId));
 
                       return (
                         <div 
                           key={mId} 
-                          style={{ marginLeft: `${indent}px` }}
-                          className="flex items-center gap-2 text-slate-700 pt-1"
+                          style={{ marginLeft: isSubLead ? '32px' : '16px' }}
+                          className="flex items-center justify-between text-slate-700 pt-1"
                         >
-                          <ArrowDownRight className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-1 rounded">
-                            L{lvl}
-                          </span>
-                          <span className="font-semibold">{emp.fullName || emp.name}</span>
-                          <span className="text-[11px] text-slate-500">({emp.role})</span>
+                          <div className="flex items-center gap-2">
+                            <ArrowDownRight className="w-3.5 h-3.5 text-slate-400" />
+                            <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-1 rounded">
+                              L{lvl}
+                            </span>
+                            <span className="font-semibold">{emp.fullName || emp.name}</span>
+                            <span className="text-[11px] text-slate-500">({emp.role})</span>
+                          </div>
+                          {isSubLead && repLeadObj && (
+                            <span className="text-[10px] font-mono text-emerald-800 bg-emerald-100/70 px-1.5 py-0.2 rounded">
+                              Reports to: {repLeadObj.fullName || repLeadObj.name}
+                            </span>
+                          )}
                         </div>
                       );
                     })}

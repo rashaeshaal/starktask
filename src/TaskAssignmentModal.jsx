@@ -268,11 +268,11 @@ export default function TaskAssignmentModal({
 
     // Operations downline enforcement
     if (isOperationsRole) {
-      return getAssignableEmployees(currentUser, employees, selectedDept);
+      return getAssignableEmployees(currentUser, employees, selectedDept, teamMembers);
     }
 
     if (isMarketingRole) {
-      return getAssignableEmployees(currentUser, employees, 'marketing');
+      return getAssignableEmployees(currentUser, employees, 'marketing', teamMembers);
     }
 
     if (isGlobalManager) {
@@ -284,11 +284,26 @@ export default function TaskAssignmentModal({
     }
 
     if (isSales) {
-      return employees.filter(emp => canSalesAssignTo(currentUser, emp, employees));
+      const salesAllowed = employees.filter(emp => canSalesAssignTo(currentUser, emp, employees));
+      // Also allow dynamic subordinates reporting directly to currentUser in any squad
+      const directSubordinateIds = new Set(
+        teamMembers
+          .filter(tm => (tm.reportingLeadId === currentUser?.id || tm.reportingLeadId === currentUser?.uid))
+          .map(tm => tm.employeeId || tm.id)
+      );
+      if (directSubordinateIds.size > 0) {
+        const subordinates = employees.filter(e => directSubordinateIds.has(e.id));
+        const combined = [...salesAllowed];
+        for (const sub of subordinates) {
+          if (!combined.some(c => c.id === sub.id)) combined.push(sub);
+        }
+        return combined;
+      }
+      return salesAllowed;
     }
 
-    return getAssignableEmployees(currentUser, employees, selectedDept);
-  }, [currentUser, isFrontlineOrAssistant, isOperationsRole, isMarketingRole, isGlobalManager, isSales, employees, selectedDept]);
+    return getAssignableEmployees(currentUser, employees, selectedDept, teamMembers);
+  }, [currentUser, isFrontlineOrAssistant, isOperationsRole, isMarketingRole, isGlobalManager, isSales, employees, selectedDept, teamMembers]);
 
   // Filter assignees by search query and group by role
   const filteredEmployees = useMemo(() => {

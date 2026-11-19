@@ -674,6 +674,65 @@ export async function addTeamMembers(teamId, teamName, memberEmployees, addedByU
   });
 }
 
+// Sync all team members when editing a team (adds new, removes unselected, updates reporting lead)
+export async function syncTeamMembers(teamId, teamName, memberEmployees, user) {
+  const todayStr = getTodayDateString();
+  const timeNow = new Date().toLocaleTimeString();
+
+  // 1. Get existing members in Firestore
+  const curSnap = await getDocs(query(collection(db, TEAM_MEMBERS_COL), where('teamId', '==', teamId)));
+  const existingDocMap = new Map();
+  curSnap.forEach(d => {
+    const data = d.data();
+    const uid = data.userId || data.employeeId;
+    if (uid) existingDocMap.set(String(uid), d.id);
+  });
+
+  const newMemberUids = new Set(memberEmployees.map(m => String(m.id || m.userId || m.employeeId)));
+
+  const batch = writeBatch(db);
+
+  // 2. Delete removed members
+  for (const [uid, docId] of existingDocMap.entries()) {
+    if (!newMemberUids.has(uid)) {
+      batch.delete(doc(db, TEAM_MEMBERS_COL, docId));
+    }
+  }
+
+  // 3. Upsert selected members with reportingLeadId / reportsTo
+  for (const emp of memberEmployees) {
+    const empId = String(emp.id || emp.userId || emp.employeeId);
+    const memberDocRef = doc(db, TEAM_MEMBERS_COL, `${teamId}_${empId}`);
+    batch.set(memberDocRef, {
+      id: `${teamId}_${empId}`,
+      teamId,
+      teamName,
+      employeeId: emp.employeeId || empId,
+      userId: empId,
+      fullName: emp.fullName || emp.name,
+      role: emp.role || emp.designation,
+      department: emp.department || emp.departmentId,
+      email: emp.email || '',
+      reportingLeadId: emp.reportingLeadId || null,
+      reportingLeadName: emp.reportingLeadName || null,
+      addedById: user.id || user.uid,
+      addedByName: `${user.fullName || user.name} (${user.role || ''})`,
+      addedAt: `${todayStr} ${timeNow}`,
+      status: 'active',
+      serverTimestamp: serverTimestamp()
+    }, { merge: true });
+  }
+
+  await batch.commit();
+
+  // 4. Update team member count
+  const allMembersSnap = await getDocs(query(collection(db, TEAM_MEMBERS_COL), where('teamId', '==', teamId), where('status', '==', 'active')));
+  await updateDoc(doc(db, TEAMS_COL, teamId), {
+    memberCount: allMembersSnap.size,
+    updatedAt: serverTimestamp()
+  });
+}
+
 // Remove member from Team
 export async function removeTeamMember(teamId, userId) {
   const memberDocRef = doc(db, TEAM_MEMBERS_COL, `${teamId}_${userId}`);

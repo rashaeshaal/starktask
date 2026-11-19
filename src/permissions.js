@@ -1008,10 +1008,25 @@ export function canManageTeam(user, team = null) {
   return false;
 }
 
-export function canUserAssignTo(assigner, assignee, allEmployees = []) {
+export function canUserAssignTo(assigner, assignee, allEmployees = [], teamMembers = []) {
   if (!assigner || !assignee) return false;
   const config = getRoleConfig(assigner);
   if (!config || !config.canAssign) return false;
+
+  const assignerId = String(assigner.id || assigner.uid || assigner.employeeId || '');
+  const assigneeId = String(assignee.id || assignee.uid || assignee.employeeId || '');
+  if (assignerId === assigneeId) return false;
+
+  // Dynamic team member reportingLead check:
+  // If in any team, assignee reports directly to assigner (via reportingLeadId or direct leader), they can assign!
+  if (Array.isArray(teamMembers) && teamMembers.length > 0) {
+    const isDirectTeamLead = teamMembers.some(tm => 
+      String(tm.userId || tm.employeeId) === assigneeId && 
+      String(tm.reportingLeadId) === assignerId &&
+      tm.status === 'active'
+    );
+    if (isDirectTeamLead) return true;
+  }
 
   const roleNorm = normalizeRoleName(assigner.role || '');
 
@@ -1036,17 +1051,27 @@ export function canUserAssignTo(assigner, assignee, allEmployees = []) {
 
   // 4. Downline check: assigner can assign to anyone in their downline tree
   const visibleIds = getVisibleUserIds(assigner, allEmployees);
-  const assigneeId = String(assignee.id || assignee.uid || assignee.employeeId);
   return visibleIds.includes(assigneeId);
 }
 
-export function getAssignableEmployees(user, allEmployees = [], deptFilter = null) {
+export function getAssignableEmployees(user, allEmployees = [], deptFilter = null, teamMembers = []) {
   if (!user || !allEmployees) return [];
   const config = getRoleConfig(user);
   if (!config || !config.canAssign) return [];
 
   const myId = String(user.id || user.uid || user.employeeId);
   const roleNorm = normalizeRoleName(user.role || '');
+
+  // Dynamic squad reporting lead support:
+  // If this user is configured as a squad leader or sub-lead for any members, add those members!
+  const squadReportingMemberIds = new Set();
+  if (Array.isArray(teamMembers) && teamMembers.length > 0) {
+    teamMembers.forEach(tm => {
+      if (String(tm.reportingLeadId) === myId && tm.status === 'active') {
+        squadReportingMemberIds.add(String(tm.userId || tm.employeeId));
+      }
+    });
+  }
 
   // Top Universal Leadership & CSO
   if (roleNorm === 'CSO' || roleNorm === 'Director Operations' || roleNorm === 'Executive Director') {
@@ -1083,6 +1108,7 @@ export function getAssignableEmployees(user, allEmployees = [], deptFilter = nul
     return allEmployees.filter(e => {
       const id = String(e.id || e.uid || e.employeeId);
       if (id === myId) return false;
+      if (squadReportingMemberIds.has(id)) return true;
       const r = normalizeRoleName(e.role || e.designation || '');
       return opsBranchRoles.includes(r);
     });
@@ -1093,15 +1119,16 @@ export function getAssignableEmployees(user, allEmployees = [], deptFilter = nul
     return allEmployees.filter(e => {
       const id = String(e.id || e.uid || e.employeeId);
       if (id === myId) return false;
+      if (squadReportingMemberIds.has(id)) return true;
       const r = normalizeRoleName(e.role || e.designation || '');
       return r === 'Accountant';
     });
   }
 
-  // HR Manager, Admin Manager & Downline supervisors
+  // HR Manager, Admin Manager, Squad Sub-Leads & Downline supervisors
   const visibleIds = getVisibleUserIds(user, allEmployees);
   return allEmployees.filter(e => {
     const id = String(e.id || e.uid || e.employeeId);
-    return id !== myId && visibleIds.includes(id);
+    return id !== myId && (visibleIds.includes(id) || squadReportingMemberIds.has(id));
   });
 }
