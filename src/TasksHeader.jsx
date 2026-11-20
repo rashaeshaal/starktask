@@ -21,12 +21,6 @@ export default function TasksHeader({
       id: 'my_tasks',
       label: 'My Work',
       count: todayCount
-    },
-    {
-      id: 'assigned_by_me',
-      label: 'Assigned by Me',
-      count: assignedByMeCount,
-      icon: Send
     }
   ];
 
@@ -113,3 +107,4 @@ export default function TasksHeader({
     </div>
   );
 }
+

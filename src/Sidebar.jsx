@@ -301,29 +301,6 @@ export default function Sidebar({
                 </button>
               )}
 
-              {/* Tasks Assigned by Me */}
-              {canSeeAssignedTasks && (
-                <button
-                  onClick={() => handleNavClick('assigned_tasks')}
-                  title={isCollapsed ? 'Assigned by Me' : ''}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                    activeTab === 'assigned_tasks'
-                      ? 'bg-[#0d4a2d] text-white shadow-xs'
-                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Send className="w-4 h-4 shrink-0 text-emerald-400" />
-                    {!isCollapsed && <span>Assigned by Me</span>}
-                  </div>
-                  {!isCollapsed && (taskCounts?.assignedByMeCount > 0) && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                      {taskCounts.assignedByMeCount}
-                    </span>
-                  )}
-                </button>
-              )}
-
               {/* Notes & Notebooks (Zoho Cliq style) */}
               {canSeeTodos && (
                 <button
