@@ -179,6 +179,7 @@ export default function App() {
   useEffect(() => {
     if (!activeEmployee) return;
 
+    // Use current activeEmployee identifier as stable trigger to prevent re-attaching listeners
     const unsubTasks = subscribeToTasks(activeEmployee, setTasks, employees);
     const unsubNotifs = subscribeToNotifications(activeEmployee.id || activeEmployee.uid, setNotifications);
 
@@ -186,7 +187,7 @@ export default function App() {
       unsubTasks && unsubTasks();
       unsubNotifs && unsubNotifs();
     };
-  }, [activeEmployee, employees]);
+  }, [activeEmployee?.id || activeEmployee?.uid]);
 
   // 3. Private User To-Dos Listener
   useEffect(() => {
