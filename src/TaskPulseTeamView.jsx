@@ -795,8 +795,9 @@ export default function TaskPulseTeamView({
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50/50 text-slate-500 font-semibold uppercase text-[10px]">
                       <th className="py-2.5 px-3 w-10 text-center">Done</th>
-                      <th className="py-2.5 px-3 w-1/3">Task & Reference</th>
+                      <th className="py-2.5 px-3 w-72">Task & Reference</th>
                       <th className="py-2.5 px-3 w-32">Assignee</th>
+                      <th className="py-2.5 px-3 w-32">Assigned By</th>
                       {dateFilter === 'all' && <th className="py-2.5 px-3 w-24">Date</th>}
                       <th className="py-2.5 px-3 w-28 hidden lg:table-cell">Dept / Location</th>
                       <th className="py-2.5 px-3 w-20">Priority</th>
@@ -906,6 +907,41 @@ export default function TaskPulseTeamView({
                                 )}
                               </div>
                             </div>
+                          </td>
+
+                          {/* Assigned By Column */}
+                          <td className="py-2.5 px-3 align-middle text-slate-700 whitespace-nowrap">
+                            {(() => {
+                              const byName = task.assignedByName || task.createdByName;
+                              const isSelf = task.selfLogged || (task.createdById && (task.createdById === currentUserId || task.createdById === currentUserEmpId) && !task.assignedByName);
+                              if (isSelf) {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                    Self
+                                  </span>
+                                );
+                              }
+                              if (byName) {
+                                return (
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <div className="w-5 h-5 rounded-full bg-emerald-50 text-[#05331F] font-bold flex items-center justify-center text-[10px] shrink-0 border border-emerald-300">
+                                      {byName.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div className="truncate">
+                                      <span className="font-semibold text-[#05331F] truncate block max-w-[110px]" title={byName}>
+                                        {byName}
+                                      </span>
+                                      {task.assignedByRole && (
+                                        <span className="text-[10px] text-slate-400 block truncate max-w-[110px]">
+                                          {task.assignedByRole}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return <span className="text-slate-400 text-[11px]">—</span>;
+                            })()}
                           </td>
 
                           {dateFilter === 'all' && (
