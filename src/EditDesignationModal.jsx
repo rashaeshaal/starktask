@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Briefcase, X, AlertCircle, Loader2 } from 'lucide-react';
-import { COMPANY_DEPARTMENTS, ORG_TREE, getRoleLevel } from './orgTree';
+import { COMPANY_DEPARTMENTS, getRoleLevel } from './orgTree';
+import { formatDepartment } from './orgHelpers';
 
 export default function EditDesignationModal({
   isOpen,
@@ -15,42 +16,48 @@ export default function EditDesignationModal({
   const isEditing = Boolean(designation && designation.id);
 
   const [title, setTitle] = useState('');
-  const [departmentId, setDepartmentId] = useState(COMPANY_DEPARTMENTS[0].id);
-  const [level, setLevel] = useState(4);
-  const [parentDesignation, setParentDesignation] = useState('');
-  const [roleMapping, setRoleMapping] = useState('');
+  const [departmentId, setDepartmentId] = useState(
+    departments[0]?.id || COMPANY_DEPARTMENTS[0]?.id || 'operations'
+  );
+  const [level, setLevel] = useState(5);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Department list options
+  const deptList = departments.length > 0 ? departments : COMPANY_DEPARTMENTS;
+
   useEffect(() => {
     if (designation) {
-      setTitle(designation.title || designation.name || '');
-      setDepartmentId(designation.departmentId || designation.department || COMPANY_DEPARTMENTS[0].id);
-      setLevel(designation.level || 4);
-      setParentDesignation(designation.parentDesignation || designation.reportsToDesignationId || '');
-      setRoleMapping(designation.roleMapping || designation.role || designation.title || '');
+      const desigTitle = designation.title || designation.name || '';
+      setTitle(desigTitle);
+      setDepartmentId(designation.departmentId || designation.department || deptList[0]?.id || 'operations');
+      setLevel(designation.level || getRoleLevel(desigTitle) || 5);
     } else {
       setTitle('');
-      setDepartmentId(COMPANY_DEPARTMENTS[0].id);
-      setLevel(4);
-      setParentDesignation('');
-      setRoleMapping('');
+      setDepartmentId(deptList[0]?.id || 'operations');
+      setLevel(5);
     }
     setError('');
-  }, [designation, isOpen]);
+  }, [designation, isOpen, deptList]);
 
-  // Eligible parent designations (must be in org tree)
-  const eligibleParents = designations.filter(d => {
-    if (isEditing && d.id === designation.id) return false;
-    return true;
-  });
+  // Auto-suggest level when title is typed if user hasn't manually set
+  const handleTitleChange = (val) => {
+    setTitle(val);
+    if (!isEditing && val.trim().length > 2) {
+      const suggestedLevel = getRoleLevel(val);
+      if (suggestedLevel) {
+        setLevel(suggestedLevel);
+      }
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
-    if (!title.trim()) {
-      setError('Designation title is required.');
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setError('Please enter a designation title.');
       return;
     }
 
@@ -58,15 +65,13 @@ export default function EditDesignationModal({
 
     const payload = {
       id: isEditing ? designation.id : `des_${Date.now()}`,
-      title: title.trim(),
-      name: title.trim(),
+      title: trimmedTitle,
+      name: trimmedTitle,
       departmentId,
       department: departmentId,
       level: Number(level),
-      parentDesignation: parentDesignation || null,
-      reportsToDesignationId: parentDesignation || null,
-      roleMapping: roleMapping.trim() || title.trim(),
-      role: roleMapping.trim() || title.trim()
+      roleMapping: trimmedTitle,
+      role: trimmedTitle
     };
 
     try {
@@ -84,134 +89,115 @@ export default function EditDesignationModal({
 
   return (
     <div 
-      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto safe-pb safe-pt"
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-auto"
+        className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-xl border border-slate-200 space-y-4 my-auto animate-in fade-in zoom-in-95 duration-150"
       >
+        {/* Header */}
         <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-          <div className="flex items-center gap-2.5 truncate mr-2">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold shrink-0 border border-emerald-200">
-              <Briefcase className="w-5 h-5 text-[#05331F]" />
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold shrink-0 border border-emerald-200">
+              <Briefcase className="w-4 h-4 text-[#05331F]" />
             </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900 truncate">
-                {isEditing ? 'Edit Designation' : 'Add Corporate Designation'}
+            <div className="truncate">
+              <h3 className="text-sm font-semibold text-slate-900 truncate">
+                {isEditing ? 'Edit Designation' : 'Add Designation'}
               </h3>
-              <p className="text-xs text-slate-500">Org Tree Hierarchy Mapping</p>
+              <p className="text-[11px] text-slate-500">Corporate role & level</p>
             </div>
           </div>
           <button 
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 shrink-0"
+            aria-label="Close modal"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 shrink-0 transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {error && (
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+        {/* Minimal 3-Field Form */}
+        <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
+          {/* 1. Title */}
           <div>
-            <label className="block font-semibold text-slate-700 mb-1">Designation Title *</label>
+            <label className="block font-semibold text-slate-700 mb-1">
+              Designation Title *
+            </label>
             <input
               type="text"
               required
-              placeholder="e.g. Senior Logistics Coordinator"
+              autoFocus
+              placeholder="e.g. Sales Coordinator"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
+              onChange={(e) => handleTitleChange(e.target.value)}
+              className="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-colors"
             />
           </div>
 
+          {/* 2. Department */}
           <div>
-            <label className="block font-semibold text-slate-700 mb-1">Department *</label>
+            <label className="block font-semibold text-slate-700 mb-1">
+              Department *
+            </label>
             <select
               value={departmentId}
               onChange={(e) => setDepartmentId(e.target.value)}
-              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
+              className="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-colors cursor-pointer"
             >
-              {COMPANY_DEPARTMENTS.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
+              {deptList.map(d => (
+                <option key={d.id} value={d.id}>
+                  {d.name || formatDepartment(d.id)}
+                </option>
               ))}
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Org Tree Level</label>
-              <select
-                value={level}
-                onChange={(e) => setLevel(Number(e.target.value))}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
-              >
-                <option value="1">Level 1 (Executive)</option>
-                <option value="2">Level 2 (Director / GM)</option>
-                <option value="3">Level 3 (Department Head)</option>
-                <option value="4">Level 4 (Supervisor / Senior)</option>
-                <option value="5">Level 5 (Operational Staff)</option>
-                <option value="6">Level 6 (Crew / Support)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Parent Designation</label>
-              <select
-                value={parentDesignation}
-                onChange={(e) => setParentDesignation(e.target.value)}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
-              >
-                <option value="">-- Choose Parent --</option>
-                {eligibleParents.map(p => (
-                  <option key={p.id || p.title} value={p.id || p.title}>
-                    {p.title} (Level {p.level || 3})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
+          {/* 3. Level */}
           <div>
-            <label className="block font-semibold text-slate-700 mb-1">Role / Access Level Mapping</label>
-            <input
-              type="text"
-              placeholder="e.g. Transport Coordinator"
-              value={roleMapping}
-              onChange={(e) => setRoleMapping(e.target.value)}
-              className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F]"
-            />
+            <label className="block font-semibold text-slate-700 mb-1">
+              Hierarchy Level
+            </label>
+            <select
+              value={level}
+              onChange={(e) => setLevel(Number(e.target.value))}
+              className="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-colors cursor-pointer"
+            >
+              <option value="1">Level 1 · Executive Leadership</option>
+              <option value="2">Level 2 · Senior Operations & GM</option>
+              <option value="3">Level 3 · Department Head</option>
+              <option value="4">Level 4 · Branch / State Manager</option>
+              <option value="5">Level 5 · Assistant Manager & Staff</option>
+              <option value="6">Level 6 · Frontline Specialist</option>
+            </select>
           </div>
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
               disabled={loading}
-              className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
+              className="h-9 px-3.5 rounded-xl text-slate-600 hover:bg-slate-100 font-medium transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472c] text-white font-semibold shadow-md transition-all active:scale-98 disabled:opacity-50"
+              className="h-9 px-4 rounded-xl bg-[#05331F] hover:bg-[#0a4a2f] text-white font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50 shadow-2xs"
             >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-emerald-300" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <span>{isEditing ? 'Save Changes' : 'Create Designation'}</span>
-              )}
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-300" />}
+              <span>{isEditing ? 'Save Changes' : 'Add Designation'}</span>
             </button>
           </div>
         </form>
