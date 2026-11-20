@@ -214,18 +214,32 @@ export function subscribeToTasks(currentUser, callback, allEmployees = []) {
 
   // 3. Downline Scope: Chunks visible user IDs at 30 for Firestore 'in' queries
   if (scope === SCOPES.DOWNLINE) {
-    const visibleIds = getVisibleUserIds(currentUser, allEmployees);
-    
-    // If empty or only self
-    if (visibleIds.length <= 1) {
-      const q = query(collection(db, TASKS_COL), where('assignedToId', '==', uid));
-      return onSnapshot(q, (snapshot) => {
-        const list = [];
-        snapshot.forEach(d => list.push({ id: d.id, ...d.data() }));
-        callback(list);
-      });
+    const rawVisibleIds = getVisibleUserIds(currentUser, allEmployees);
+    // Expand visible IDs with their employeeId and emp_ prefix variations
+    const expandedIds = new Set(rawVisibleIds);
+    allEmployees.forEach(emp => {
+      const eId = String(emp.id || '');
+      const eUid = String(emp.uid || '');
+      const empNum = emp.employeeId ? String(emp.employeeId) : '';
+      if (rawVisibleIds.includes(eId) || rawVisibleIds.includes(eUid) || (empNum && rawVisibleIds.includes(empNum))) {
+        if (eId) expandedIds.add(eId);
+        if (eUid) expandedIds.add(eUid);
+        if (empNum) {
+          expandedIds.add(empNum);
+          expandedIds.add(`emp_${empNum}`);
+        }
+      }
+    });
+    // Add current user's own IDs
+    expandedIds.add(String(currentUser.id || ''));
+    expandedIds.add(String(currentUser.uid || ''));
+    if (currentUser.employeeId) {
+      expandedIds.add(String(currentUser.employeeId));
+      expandedIds.add(`emp_${currentUser.employeeId}`);
     }
 
+    const visibleIds = Array.from(expandedIds).filter(Boolean);
+    
     // Chunking array at max 30 items
     const chunkSize = 30;
     const chunks = [];
@@ -234,44 +248,123 @@ export function subscribeToTasks(currentUser, callback, allEmployees = []) {
     }
 
     const chunkResults = new Map();
-    const unsubs = chunks.map((chunk, idx) => {
-      const q = query(collection(db, TASKS_COL), where('assignedToId', 'in', chunk));
-      return onSnapshot(q, (snap) => {
-        const chunkList = [];
-        snap.forEach(d => chunkList.push({ id: d.id, ...d.data() }));
-        chunkResults.set(idx, chunkList);
-
-        // Aggregate results
-        const aggregated = [];
-        chunkResults.forEach(l => aggregated.push(...l));
-        callback(aggregated);
-      }, (err) => {
-        console.error(`Downline task chunk ${idx} error:`, err);
+    const emitAggregated = () => {
+      const map = new Map();
+      chunkResults.forEach(list => {
+        list.forEach(item => map.set(item.id, item));
       });
+      const aggregated = Array.from(map.values());
+      aggregated.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return timeB - timeA;
+      });
+      callback(aggregated);
+    };
+
+    const unsubs = [];
+
+    // Query 1: Tasks assigned to downline or self
+    chunks.forEach((chunk, idx) => {
+      const q = query(collection(db, TASKS_COL), where('assignedToId', 'in', chunk));
+      unsubs.push(
+        onSnapshot(q, (snap) => {
+          const chunkList = [];
+          snap.forEach(d => chunkList.push({ id: d.id, ...d.data() }));
+          chunkResults.set(`assigned_${idx}`, chunkList);
+          emitAggregated();
+        }, (err) => {
+          console.error(`Downline task chunk ${idx} error:`, err);
+        })
+      );
     });
 
-    return () => unsubs.forEach(unsub => unsub());
+    // Query 2: Tasks assigned BY the current user (e.g. Shamna)
+    const myIds = [currentUser.id, currentUser.uid, currentUser.employeeId, currentUser.employeeId ? `emp_${currentUser.employeeId}` : null].filter(Boolean).map(String);
+    if (myIds.length > 0) {
+      const qAssignedBy = query(collection(db, TASKS_COL), where('assignedById', 'in', myIds.slice(0, 30)));
+      unsubs.push(
+        onSnapshot(qAssignedBy, (snap) => {
+          const byList = [];
+          snap.forEach(d => byList.push({ id: d.id, ...d.data() }));
+          chunkResults.set('assigned_by_me', byList);
+          emitAggregated();
+        }, (err) => {
+          console.warn('Downline assignedById error:', err);
+        })
+      );
+    }
+
+    return () => unsubs.forEach(unsub => unsub && unsub());
   }
 
-  // 4. Self Scope: Frontline personnel (assignedToId == uid or assignedTo == uid)
-  const q = query(
-    collection(db, TASKS_COL),
-    where('assignedToId', '==', uid)
-  );
+  // 4. Self Scope: Frontline personnel
+  // Listen to tasks assigned TO this user OR assigned BY this user
+  const selfIds = Array.from(new Set([
+    currentUser.id,
+    currentUser.uid,
+    currentUser.employeeId,
+    currentUser.employeeId ? `emp_${currentUser.employeeId}` : null,
+    currentUser.id && String(currentUser.id).startsWith('emp_') ? String(currentUser.id).replace('emp_', '') : null,
+    currentUser.email
+  ].filter(Boolean).map(String)));
 
-  return onSnapshot(q, (snapshot) => {
-    const list = [];
-    snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
-    callback(list);
-  }, (err) => {
-    console.error('Self tasks listener error, falling back to assignedTo query:', err);
-    const qFallback = query(collection(db, TASKS_COL), where('assignedTo', '==', uid));
-    return onSnapshot(qFallback, (altSnap) => {
-      const altList = [];
-      altSnap.forEach(d => altList.push({ id: d.id, ...d.data() }));
-      callback(altList);
+  const listeners = [];
+  const selfMap = new Map();
+
+  const emitSelfTasks = () => {
+    const list = Array.from(selfMap.values());
+    list.sort((a, b) => {
+      const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return timeB - timeA;
     });
-  });
+    callback(list);
+  };
+
+  // 4a. Assigned to me via assignedToId (chunks of 30)
+  for (let i = 0; i < selfIds.length; i += 30) {
+    const chunk = selfIds.slice(i, i + 30);
+    const qAssigned = query(collection(db, TASKS_COL), where('assignedToId', 'in', chunk));
+    listeners.push(
+      onSnapshot(qAssigned, (snap) => {
+        snap.forEach(d => selfMap.set(d.id, { id: d.id, ...d.data() }));
+        emitSelfTasks();
+      }, (err) => {
+        console.warn('assignedToId query error, falling back:', err);
+      })
+    );
+  }
+
+  // 4b. Assigned to me via assigneeIds array
+  for (let i = 0; i < selfIds.length; i += 10) {
+    const chunk = selfIds.slice(i, i + 10);
+    const qAssigneeIds = query(collection(db, TASKS_COL), where('assigneeIds', 'array-contains-any', chunk));
+    listeners.push(
+      onSnapshot(qAssigneeIds, (snap) => {
+        snap.forEach(d => selfMap.set(d.id, { id: d.id, ...d.data() }));
+        emitSelfTasks();
+      }, (err) => {
+        console.warn('assigneeIds query error:', err);
+      })
+    );
+  }
+
+  // 4c. Tasks created / assigned BY me
+  for (let i = 0; i < selfIds.length; i += 30) {
+    const chunk = selfIds.slice(i, i + 30);
+    const qAssignedBy = query(collection(db, TASKS_COL), where('assignedById', 'in', chunk));
+    listeners.push(
+      onSnapshot(qAssignedBy, (snap) => {
+        snap.forEach(d => selfMap.set(d.id, { id: d.id, ...d.data() }));
+        emitSelfTasks();
+      }, (err) => {
+        console.warn('assignedById query error:', err);
+      })
+    );
+  }
+
+  return () => listeners.forEach(unsub => unsub && unsub());
 }
 
 /**

@@ -84,6 +84,24 @@ export default function TaskPulseTeamView({
   const userRole = currentUser?.role || '';
   const currentUserId = String(currentUser?.id || currentUser?.uid || currentUser?.employeeId || '');
   const currentUserEmpId = String(currentUser?.employeeId || '');
+  const currentUserDirectoryId = currentUser?.employeeId ? `emp_${currentUser.employeeId}` : '';
+  const currentUserEmail = String(currentUser?.email || '').toLowerCase();
+  const currentUserName = String(currentUser?.fullName || currentUser?.name || '').toLowerCase();
+
+  // Build a set of all valid user aliases
+  const currentUserAliases = useMemo(() => {
+    const s = new Set([
+      currentUserId,
+      currentUserEmpId,
+      currentUserDirectoryId,
+      currentUserEmail,
+      currentUser?.uid ? String(currentUser.uid) : null,
+      currentUser?.id ? String(currentUser.id) : null,
+      currentUser?.employeeId ? String(currentUser.employeeId) : null,
+      currentUser?.id && String(currentUser.id).startsWith('emp_') ? String(currentUser.id).replace('emp_', '') : null
+    ].filter(Boolean));
+    return s;
+  }, [currentUser, currentUserId, currentUserEmpId, currentUserDirectoryId, currentUserEmail]);
 
   const isBrandManager = userRole === 'Brand Manager';
   const isOperationsHead = userRole === 'Operations Head';
@@ -192,15 +210,19 @@ export default function TaskPulseTeamView({
       } else if (viewMode === 'assigned_by_me') {
         // Tasks assigned by this user to downline / others
         const byId = String(task.assignedById || task.createdById || '');
-        const isAssignedByMe = (currentUserId && byId === currentUserId) || 
-                               (currentUserEmpId && byId === currentUserEmpId);
+        const byName = String(task.assignedByName || '').toLowerCase();
+        const isAssignedByMe = currentUserAliases.has(byId) || 
+                               (currentUserName && byName.includes(currentUserName));
         if (!isAssignedByMe) return false;
       } else {
         // Standard My Tasks view
         const taskAssigneeId = String(task.assignedToId || task.assignedTo || '');
         const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds.map(String) : [];
-        const isMine = (currentUserId && (taskAssigneeId === currentUserId || taskAssigneeIds.includes(currentUserId))) ||
-                       (currentUserEmpId && (taskAssigneeId === currentUserEmpId || taskAssigneeIds.includes(currentUserEmpId)));
+        const taskAssigneeName = String(task.assignedToName || '').toLowerCase();
+
+        const isMine = currentUserAliases.has(taskAssigneeId) ||
+                       taskAssigneeIds.some(id => currentUserAliases.has(id)) ||
+                       (currentUserName && taskAssigneeName.includes(currentUserName));
         if (!isMine) return false;
       }
 
