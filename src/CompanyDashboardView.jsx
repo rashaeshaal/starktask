@@ -470,69 +470,69 @@ export default function CompanyDashboardView({
         </div>
       </div>
 
-      {/* 2. Top Metric Cards (Total, Completed, Pending, Overdue) with scope label */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      {/* 2. Top Metric Cards (Total, Completed, Pending, Overdue) - Compact Sleek Design */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         
         {/* Card 1: Total Tasks Today */}
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2">
+        <div className="bg-white px-3.5 py-3 rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-600">Total Tasks</span>
-            <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-              <Layers className="w-4 h-4" />
+            <span className="text-[11px] font-semibold text-slate-500">Total Tasks</span>
+            <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500">
+              <Layers className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900">{totalTasksToday}</span>
-            <span className="text-[11px] font-semibold text-slate-500">today</span>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className="text-xl sm:text-2xl font-bold text-slate-900">{totalTasksToday}</span>
+            <span className="text-[10px] text-slate-400 font-medium">today</span>
           </div>
-          <p className="text-[11px] text-slate-500 truncate">{scopeKpiLabel}</p>
+          <p className="text-[10px] text-slate-400 truncate mt-0.5">{scopeKpiLabel}</p>
         </div>
 
         {/* Card 2: Completed Today */}
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2">
+        <div className="bg-white px-3.5 py-3 rounded-xl border border-slate-200/90 shadow-2xs hover:border-emerald-300 transition">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-600">Completed</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-700">
-              <CheckCircle2 className="w-4 h-4" />
+            <span className="text-[11px] font-semibold text-slate-500">Completed</span>
+            <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-700">
+              <CheckCircle2 className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-[#05331F]">{completedToday}</span>
-            <span className="text-[11px] font-semibold text-emerald-700">({completionPct}%)</span>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className="text-xl sm:text-2xl font-bold text-[#05331F]">{completedToday}</span>
+            <span className="text-[10px] font-semibold text-emerald-700">({completionPct}%)</span>
           </div>
-          <p className="text-[11px] text-slate-500 truncate">{completionPct}% completion rate</p>
+          <p className="text-[10px] text-slate-400 truncate mt-0.5">{completionPct}% finished</p>
         </div>
 
         {/* Card 3: Pending / In Progress */}
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2">
+        <div className="bg-white px-3.5 py-3 rounded-xl border border-slate-200/90 shadow-2xs hover:border-amber-300 transition">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-600">Pending / In Progress</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center text-amber-700">
-              <Clock className="w-4 h-4" />
+            <span className="text-[11px] font-semibold text-slate-500">In Progress</span>
+            <div className="w-6 h-6 rounded-lg bg-amber-50 flex items-center justify-center text-amber-700">
+              <Clock className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900">{pendingToday}</span>
-            <span className="text-[11px] font-semibold text-slate-500">remaining</span>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className="text-xl sm:text-2xl font-bold text-slate-900">{pendingToday}</span>
+            <span className="text-[10px] text-slate-400 font-medium">remaining</span>
           </div>
-          <p className="text-[11px] text-slate-500 truncate">Currently in execution</p>
+          <p className="text-[10px] text-slate-400 truncate mt-0.5">Active execution</p>
         </div>
 
         {/* Card 4: Overdue Tasks */}
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2">
+        <div className="bg-white px-3.5 py-3 rounded-xl border border-slate-200/90 shadow-2xs hover:border-rose-300 transition">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-600">Overdue Tasks</span>
-            <div className="w-8 h-8 rounded-xl bg-rose-50 flex items-center justify-center text-rose-700">
-              <AlertTriangle className="w-4 h-4" />
+            <span className="text-[11px] font-semibold text-slate-500">Overdue</span>
+            <div className="w-6 h-6 rounded-lg bg-rose-50 flex items-center justify-center text-rose-700">
+              <AlertTriangle className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-2xl sm:text-3xl font-extrabold ${overdueToday > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className={`text-xl sm:text-2xl font-bold ${overdueToday > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
               {overdueToday}
             </span>
-            <span className="text-[11px] font-semibold text-slate-500">missed</span>
+            <span className="text-[10px] text-slate-400 font-medium">missed</span>
           </div>
-          <p className="text-[11px] text-slate-500 truncate">Requires supervisor follow-up</p>
+          <p className="text-[10px] text-slate-400 truncate mt-0.5">Needs attention</p>
         </div>
 
       </div>
