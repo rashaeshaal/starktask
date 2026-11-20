@@ -242,11 +242,30 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Review Queue (Sign-offs waiting for current supervisor)
-  const pendingApprovals = tasks.filter(t => 
-    (t.status === TASK_STATUSES.PENDING_REVIEW || t.status === 'Pending Review' || t.status === 'Pending Sign-Off') && 
-    (canApproveTask(activeEmployee, t) || userScope === SCOPES.COMPANY)
-  );
+  // Review Queue (Tasks completed / submitted that were assigned BY this user)
+  const pendingApprovals = useMemo(() => {
+    if (!activeEmployee) return [];
+    const myId = String(activeEmployee.id || activeEmployee.uid || '');
+    const myEmpId = activeEmployee.employeeId ? String(activeEmployee.employeeId) : '';
+    const myName = String(activeEmployee.fullName || activeEmployee.name || '').toLowerCase();
+
+    return tasks.filter(t => {
+      // 1. Task must be finished by the assignee (Pending Review, Pending Sign-Off, or Completed waiting for sign-off)
+      const s = (t.status || '').toLowerCase();
+      const isSubmitted = s === 'pending review' || s === 'pending sign-off' || s === 'completed';
+      if (!isSubmitted) return false;
+
+      // 2. Strict assigner check: Only the person who assigned the task sees it in their approval page
+      const byId = String(t.assignedById || t.createdById || '');
+      const byName = String(t.assignedByName || '').toLowerCase();
+
+      const wasAssignedByMe = (myId && byId === myId) || 
+                              (myEmpId && byId === myEmpId) || 
+                              (myName && byName === myName);
+
+      return wasAssignedByMe;
+    });
+  }, [tasks, activeEmployee]);
 
   // Active escalations count
   const escalationsCount = tasks.filter(t => 
