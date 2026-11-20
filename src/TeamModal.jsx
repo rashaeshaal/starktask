@@ -5,7 +5,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Users, X, AlertCircle, Loader2, GitFork, ArrowDownRight } from 'lucide-react';
 import MemberPicker from './MemberPicker';
 import { formatName, formatDepartment } from './orgHelpers';
-import { getAllowedLeadersForDepartment, getRoleLevel, validateTeamPlacement } from './orgTree';
+import { getAllowedLeadersForDepartment, getRoleLevel, validateTeamPlacement, normalizeRole } from './orgTree';
 
 export default function TeamModal({
   isOpen,
@@ -67,16 +67,23 @@ export default function TeamModal({
     return () => document.removeEventListener('keydown', handleKey);
   }, [isOpen, onClose]);
 
-  // Eligible leaders for currently chosen department
+  // Eligible leaders for currently chosen department (using normalized roles so all department leaders appear)
   const eligibleLeaders = useMemo(() => {
-    const allowedRoles = getAllowedLeadersForDepartment(teamDept);
+    const rawAllowedRoles = getAllowedLeadersForDepartment(teamDept);
+    const normalizedAllowed = new Set(rawAllowedRoles.map(r => normalizeRole(r)));
+
     return employees.filter(emp => {
       const empDept = (emp.department || emp.departmentId || '').toLowerCase();
       const normDept = (teamDept || '').toLowerCase();
-      const matchesDept = empDept === normDept || 
-                          emp.role === 'Operations Head' || 
-                          ['Executive Director', 'Director Operations', 'General Manager'].includes(emp.role);
-      return matchesDept && allowedRoles.includes(emp.role);
+      const empNormRole = normalizeRole(emp.role);
+
+      const matchesDept = 
+        empDept === normDept || 
+        empDept === 'management' ||
+        empNormRole === 'Operations Head' || 
+        ['Executive Director', 'Director Operations', 'General Manager'].includes(empNormRole);
+
+      return matchesDept && normalizedAllowed.has(empNormRole);
     });
   }, [teamDept, employees]);
 
@@ -394,3 +401,4 @@ export default function TeamModal({
     </div>
   );
 }
+
