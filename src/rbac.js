@@ -187,14 +187,15 @@ export function canApproveTask(user, task) {
 
 /**
  * Strict Day-Locking Rule for SOP & Company Tasks:
- * Tasks created for previous dates (< today) or past midnight (23:59) are strictly locked.
- * Completed tasks are locked for regular editing.
- * Only Executive Director, Director Operations, or General Manager can override/unlock.
+ * - Tasks added today can be edited / deleted until 11:59 PM today.
+ * - From tomorrow onwards (or if past 11:59 PM), tasks are strictly locked and cannot be edited, modified, or deleted.
+ * - Completed tasks are locked for regular editing.
+ * - Only Executive Director, Director Operations, or General Manager can override/unlock historical records.
  */
 export function isTaskLockedForUser(user, task) {
   if (!task) return false;
 
-  // Executive Director, Director Operations, or General Manager can override/unlock
+  // Top Leadership can override/unlock
   const userRole = user?.role || '';
   if (userRole === 'Executive Director' || userRole === 'Director Operations' || userRole === 'General Manager') {
     return false;
@@ -206,10 +207,11 @@ export function isTaskLockedForUser(user, task) {
   const day = String(now.getDate()).padStart(2, '0');
   const today = `${year}-${month}-${day}`;
 
-  const taskDate = task.taskDate || task.date || task.dueDate || task.deadlineDate;
+  const taskDateRaw = task.taskDate || task.date || task.dueDate || task.deadlineDate;
+  const taskDate = taskDateRaw ? String(taskDateRaw).split('T')[0] : null;
 
-  // 1. Any task with a date before today is strictly locked
-  if (taskDate && String(taskDate).split('T')[0] < today) {
+  // 1. Any task with a date before today (yesterday or older) is strictly locked
+  if (taskDate && taskDate < today) {
     return true;
   }
 
@@ -218,11 +220,11 @@ export function isTaskLockedForUser(user, task) {
     return true;
   }
 
-  // 3. For tasks of today: lock if time has passed 23:59:00
-  if (taskDate && String(taskDate).split('T')[0] === today) {
+  // 3. For tasks of today: lock if time has passed 23:59:00 (11:59 PM)
+  if (taskDate && taskDate === today) {
     const hours = now.getHours();
     const minutes = now.getMinutes();
-    // 23:59 (11:59 PM) or later
+    // 23:59 (11:59 PM) or later locks the task
     if (hours === 23 && minutes >= 59) {
       return true;
     }

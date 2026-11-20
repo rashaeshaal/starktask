@@ -415,21 +415,21 @@ export default function AddTodayWorkModal({
               </div>
               {selectedTaskDate === yesterdayStr && (
                 <div className="space-y-2 pt-1">
-                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 space-y-1">
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-900">
-                      <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span>Late Yesterday Submission Reason (Mandatory) *</span>
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Reason for Missed Yesterday Log (Mandatory) *</span>
                     </div>
-                    <p className="text-[10px] text-amber-700">
-                      Standard operating rule requires daily tasks to be submitted before 11:59 PM. Please state why yesterday's work was not logged on time.
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Company policy strictly requires daily work to be logged before <strong>11:59 PM</strong> on the day of work. Because yesterday's logging deadline passed, you cannot log regular retrospective work without recording an authorized mandatory reason.
                     </p>
                     <textarea
                       rows="2"
                       required
-                      placeholder="Specify reason for late submission (e.g., Power cut, field travel without network, emergency maintenance)..."
+                      placeholder="Explain why yesterday's work was not logged before 11:59 PM (e.g. Field travel without internet, client emergency, power outage)..."
                       value={yesterdayLateReason}
                       onChange={(e) => setYesterdayLateReason(e.target.value)}
-                      className="w-full mt-1.5 p-2 bg-white border border-amber-300 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      className="w-full mt-1.5 p-2.5 bg-white border border-amber-400 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
                     />
                   </div>
                 </div>
