@@ -460,87 +460,39 @@ export default function App() {
         escalationsCount={escalationsCount}
         dueRemindersCount={dueRemindersCount}
         onOpenAssignModal={() => setIsAssignModalOpen(true)}
+        systemAlerts={systemAlerts}
+        onNavigateToTab={navigateToTabSafe}
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
       />
 
-      {/* 2. Main Content Wrapper: flex-1 min-w-0, no duplicate ml-* offset */}
+      {/* 2. Main Content Wrapper: flex-1 min-w-0, full height */}
       <div className="flex-1 min-w-0 flex flex-col">
         
-        {/* Top Navbar */}
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs w-full">
-          <div className="w-full px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-4">
-            
-            <div className="flex items-center gap-2.5">
-              <button
-                onClick={() => setIsMobileSidebarOpen(true)}
-                className="w-8 h-8 rounded-xl bg-[#05331F] text-emerald-300 flex items-center justify-center font-bold lg:hidden shrink-0 shadow-xs"
-              >
-                <Menu className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 sm:gap-3 ml-auto">
-              {/* Alerts Dropdown Bell */}
-              <div className="relative">
-                <button
-                  onClick={() => setIsAlertsOpen(prev => !prev)}
-                  className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
-                  title="Operational Alerts"
-                  aria-label="Operational Alerts"
-                >
-                  <Bell className="w-4 h-4" />
-                  {systemAlerts.length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-rose-600 text-white font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
-                      {systemAlerts.length}
-                    </span>
-                  )}
-                </button>
-
-                {/* Alerts Popover */}
-                {isAlertsOpen && (
-                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
-                      <span className="text-xs font-bold text-slate-900">Task & Planner Alerts</span>
-                      <span className="text-[10px] font-semibold text-slate-400">{systemAlerts.length} active</span>
-                    </div>
-
-                    {systemAlerts.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-4 text-center">No active alerts at this moment</p>
-                    ) : (
-                      <div className="space-y-2 max-h-64 overflow-y-auto">
-                        {systemAlerts.map(a => (
-                          <div 
-                            key={a.id}
-                            onClick={() => {
-                              navigateToTabSafe(a.actionTab);
-                              setIsAlertsOpen(false);
-                            }}
-                            className="p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 cursor-pointer transition text-xs border border-slate-100"
-                          >
-                            <p className="font-bold text-slate-800">{a.title}</p>
-                            <p className="text-[11px] text-slate-500 mt-0.5">{a.desc}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Mobile Quick Logout */}
-              <button
-                onClick={() => logout()}
-                className="lg:hidden p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl"
-                title="Logout"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
+        {/* Mobile Header Bar (lg:hidden) */}
+        <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between sticky top-0 z-30 shadow-2xs">
+          <button
+            onClick={() => setIsMobileSidebarOpen(true)}
+            className="w-8 h-8 rounded-xl bg-[#05331F] text-emerald-300 flex items-center justify-center font-bold shrink-0 shadow-xs cursor-pointer"
+            aria-label="Open Navigation"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+          
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-800 tracking-wider">STARK STEEL</span>
           </div>
-        </header>
+
+          <button
+            onClick={() => logout()}
+            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl"
+            title="Logout"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
 
         {/* Global Announcement Banner */}
         {announcements.length > 0 && (

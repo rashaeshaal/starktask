@@ -4,7 +4,7 @@ import {
   Users, Layers, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   Settings, LogOut, ChevronLeft, ChevronRight, X, Shield, 
   Calendar, RefreshCw, UserCheck, CheckSquare, Briefcase,
-  TrendingUp, Award, FileText, Check, Package, BookOpen, Send
+  TrendingUp, Award, FileText, Check, Package, BookOpen, Send, Bell
 } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { getScope, canAccess, SCOPES, PAGES } from './permissions';
@@ -27,6 +27,8 @@ export default function Sidebar({
   pendingApprovalsCount = 0,
   escalationsCount = 0,
   dueRemindersCount = 0,
+  systemAlerts = [],
+  onNavigateToTab,
   isMobileOpen,
   onCloseMobile,
   isCollapsed = false,
@@ -52,6 +54,8 @@ export default function Sidebar({
   const canSeeBookings = canAccess(currentUser, PAGES.BOOKINGS);
   const canSeeReports = canAccess(currentUser, PAGES.REPORTS);
   const canSeeSettings = canAccess(currentUser, PAGES.SETTINGS);
+
+  const [isAlertsOpen, setIsAlertsOpen] = useState(false);
 
   const getInitials = (name) => {
     if (!name) return 'EM';
@@ -394,8 +398,8 @@ export default function Sidebar({
 
         </div>
 
-        {/* Footer: User Profile & Direct Logout */}
-        <div className="p-3 border-t border-[#07472B]/70 shrink-0 bg-[#042818]/60">
+        {/* Footer: User Profile, Notification Bell & Direct Logout */}
+        <div className="p-3 border-t border-[#07472B]/70 shrink-0 bg-[#042818]/60 relative">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 overflow-hidden">
               <div className="w-8 h-8 rounded-full bg-[#10B981]/20 text-[#10B981] font-bold text-xs flex items-center justify-center shrink-0 border border-[#10B981]/30">
@@ -413,13 +417,64 @@ export default function Sidebar({
               )}
             </div>
 
-            <button
-              onClick={logout}
-              title="Sign Out"
-              className="p-1.5 rounded-lg text-emerald-300/60 hover:text-white hover:bg-rose-900/40 transition"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              {/* Notification Bell */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsAlertsOpen(prev => !prev)}
+                  className="p-1.5 rounded-lg text-emerald-300/80 hover:text-white hover:bg-[#07472B] transition relative cursor-pointer"
+                  title="Operational Alerts"
+                  aria-label="Operational Alerts"
+                >
+                  <Bell className="w-4 h-4" />
+                  {systemAlerts.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-rose-600 text-white font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                      {systemAlerts.length}
+                    </span>
+                  )}
+                </button>
+
+                {/* Alerts Popover */}
+                {isAlertsOpen && (
+                  <div className="absolute left-full bottom-0 ml-2 w-72 sm:w-80 bg-white text-slate-800 rounded-2xl shadow-2xl border border-slate-200 p-3 z-50 animate-in fade-in slide-in-from-left-2 duration-150">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
+                      <span className="text-xs font-bold text-slate-900">Task & Planner Alerts</span>
+                      <span className="text-[10px] font-semibold text-slate-400">{systemAlerts.length} active</span>
+                    </div>
+
+                    {systemAlerts.length === 0 ? (
+                      <p className="text-xs text-slate-400 py-4 text-center">No active alerts at this moment</p>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {systemAlerts.map(a => (
+                          <div 
+                            key={a.id}
+                            onClick={() => {
+                              if (onNavigateToTab) onNavigateToTab(a.actionTab);
+                              else onTabChange(a.actionTab);
+                              setIsAlertsOpen(false);
+                            }}
+                            className="p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 cursor-pointer transition text-xs border border-slate-100 text-left"
+                          >
+                            <p className="font-bold text-slate-800">{a.title}</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{a.desc}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={logout}
+                title="Sign Out"
+                className="p-1.5 rounded-lg text-emerald-300/60 hover:text-white hover:bg-rose-900/40 transition cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 
