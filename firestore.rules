@@ -108,7 +108,8 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'photoUrl', 'avatar', 'updatedAt'])
         )
       );
-      allow delete: if isAuthenticated() && canManageTargetEmployee(resource.data, request.auth.uid == userId);
+      // Employees are deactivated instead of deleted to protect historical task data & audit trails
+      allow delete: if false;
     }
 
     // --- DEPARTMENTS & DESIGNATIONS ---

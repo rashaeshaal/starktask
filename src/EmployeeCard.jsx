@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  MoreHorizontal, Edit, KeyRound, Trash2, Mail, Check, Copy
+  MoreHorizontal, Edit, KeyRound, UserX, UserCheck, Mail, Check, Copy
 } from 'lucide-react';
 import { useToast } from './ToastContext';
 import { formatName, formatEmpId, formatDepartment, DEPT_DOT_COLORS, getInitials } from './orgHelpers';
@@ -181,12 +181,16 @@ export default function EmployeeCard({
                         <button
                           type="button"
                           onClick={() => { setIsMenuOpen(false); onToggleStatus && onToggleStatus(employee); }}
-                          className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2 cursor-pointer ${
-                            isActive ? 'text-rose-600 hover:bg-rose-50' : 'text-emerald-700 hover:bg-emerald-50'
+                          className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2 cursor-pointer transition-colors ${
+                            isActive ? 'text-amber-700 hover:bg-amber-50' : 'text-emerald-700 hover:bg-emerald-50'
                           }`}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>{isActive ? 'Deactivate' : 'Activate'} Employee</span>
+                          {isActive ? (
+                            <UserX className="w-3.5 h-3.5 text-amber-600" />
+                          ) : (
+                            <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                          )}
+                          <span>{isActive ? 'Deactivate Employee' : 'Activate Employee'}</span>
                         </button>
                       </>
                     )}

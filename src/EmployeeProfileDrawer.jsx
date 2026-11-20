@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  X, Edit, KeyRound, UserCheck, Trash2, Shield, 
+  X, Edit, KeyRound, UserCheck, UserX, Shield, 
   ExternalLink, Loader2 
 } from 'lucide-react';
 
@@ -252,15 +252,19 @@ export default function EmployeeProfileDrawer({
                       onClose && onClose();
                       onToggleStatus && onToggleStatus(employee);
                     }}
-                    className={`h-10 px-3.5 rounded-xl border text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-2xs ${
+                    className={`h-10 px-3.5 rounded-xl border text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer ${
                       isActive 
-                        ? 'border-red-200 text-red-600 hover:bg-red-50' 
+                        ? 'border-amber-200 text-amber-700 hover:bg-amber-50' 
                         : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
                     }`}
                     title={isActive ? 'Deactivate Employee' : 'Activate Employee'}
                     aria-label={isActive ? 'Deactivate Employee' : 'Activate Employee'}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {isActive ? (
+                      <UserX className="w-4 h-4 text-amber-600" />
+                    ) : (
+                      <UserCheck className="w-4 h-4 text-emerald-600" />
+                    )}
                     <span className="hidden md:inline">{isActive ? 'Deactivate' : 'Activate'}</span>
                   </button>
                 )}
