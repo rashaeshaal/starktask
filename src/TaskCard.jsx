@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import StatusPill from './StatusPill';
 import PriorityPill from './PriorityPill';
-import { formatName, formatDepartment, formatDue } from './taskHelpers';
+import { formatName, formatDepartment, formatDue, formatTime } from './taskHelpers';
 import { TASK_STATUSES } from './rbac';
 
 export default function TaskCard({
@@ -91,11 +91,17 @@ export default function TaskCard({
                 {task.description}
               </p>
             )}
-            {assignerName && !isSelf && (
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Assigned by {assignerName}
-              </p>
-            )}
+            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
+              {formatTime(task.createdAt) && (
+                <span>Added {formatTime(task.createdAt)}</span>
+              )}
+              {assignerName && !isSelf && (
+                <>
+                  {formatTime(task.createdAt) && <span>•</span>}
+                  <span>By {assignerName}</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
 

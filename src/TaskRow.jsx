@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import StatusPill from './StatusPill';
 import PriorityPill from './PriorityPill';
-import { formatName, formatDepartment, formatDue } from './taskHelpers';
+import { formatName, formatDepartment, formatDue, formatTime } from './taskHelpers';
 import { TASK_STATUSES } from './rbac';
 
 export default function TaskRow({
@@ -36,6 +36,10 @@ export default function TaskRow({
   const assigneeRole = task.assignedToRole || task.assigneeRole || '';
   const assignerName = formatName(task.assignedByName || task.createdByName);
   const isSelf = task.selfLogged || (!task.assignedByName && task.createdById === currentUserId);
+
+  // Time stamps for Created time and Done time (matches Daily Sheet style)
+  const createdTime = formatTime(task.createdAt);
+  const completedTime = formatTime(task.completedAt || task.lastUpdated);
 
   // Close 3-dots menu on outside click or ESC
   useEffect(() => {
@@ -96,7 +100,7 @@ export default function TaskRow({
         </button>
       </td>
 
-      {/* 2. Task (Title + subtle assigned by line if delegated) */}
+      {/* 2. Task (Title + subtle Added time + subtle assigned by line if delegated) */}
       <td className="px-3 align-middle max-w-xs">
         <div className="min-w-0 pr-2">
           <p className={`font-semibold text-xs leading-snug truncate ${
@@ -104,11 +108,17 @@ export default function TaskRow({
           }`}>
             {task.title}
           </p>
-          {assignerName && !isSelf && (
-            <p className="text-[11px] text-slate-500 truncate mt-0.5">
-              Assigned by {assignerName}
-            </p>
-          )}
+          <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400 truncate">
+            {createdTime && (
+              <span>Added {createdTime}</span>
+            )}
+            {assignerName && !isSelf && (
+              <>
+                {createdTime && <span>•</span>}
+                <span className="text-slate-500 truncate">By {assignerName}</span>
+              </>
+            )}
+          </div>
         </div>
       </td>
 

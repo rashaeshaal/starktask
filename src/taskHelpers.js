@@ -208,6 +208,21 @@ export const PRIORITY_CONFIG = {
 };
 
 /**
+ * Safe format time string: "04:03 PM"
+ */
+export function formatTime(timestamp) {
+  if (!timestamp) return null;
+  try {
+    // If it's a Firestore Timestamp with toDate()
+    const dateObj = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    if (!isNaN(dateObj.getTime())) {
+      return dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+  } catch {}
+  return null;
+}
+
+/**
  * Safe pluralize
  */
 export function pluralize(count, singular, plural = `${singular}s`) {

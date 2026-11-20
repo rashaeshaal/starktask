@@ -2,9 +2,9 @@
 // Status pill with 6px dot & dropdown to change status (optimistic update)
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Check } from 'lucide-react';
 import { TASK_STATUSES } from './rbac';
-import { STATUS_CONFIG } from './taskHelpers';
+import { STATUS_CONFIG, formatTime } from './taskHelpers';
 
 export default function StatusPill({
   task,
@@ -44,11 +44,19 @@ export default function StatusPill({
     }
   };
 
+  const isCompleted = currentStatus === TASK_STATUSES.COMPLETED || currentStatus === 'Completed';
+  const completedTime = isCompleted ? formatTime(task?.completedAt || task?.lastUpdated) : null;
+  const statusDisplay = isCompleted && completedTime ? `Done ${completedTime}` : config.label;
+
   if (disabled) {
     return (
       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap ${config.bg} ${config.text} ${config.border}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
-        <span>{config.label}</span>
+        {isCompleted ? (
+          <Check className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
+        ) : (
+          <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
+        )}
+        <span>{statusDisplay}</span>
       </span>
     );
   }
@@ -63,11 +71,15 @@ export default function StatusPill({
         }}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        aria-label={`Status: ${config.label}. Click to change.`}
+        aria-label={`Status: ${statusDisplay}. Click to change.`}
         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${config.bg} ${config.text} ${config.border} hover:opacity-90`}
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
-        <span>{config.label}</span>
+        {isCompleted ? (
+          <Check className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
+        ) : (
+          <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
+        )}
+        <span>{statusDisplay}</span>
         <ChevronDown className="w-3 h-3 opacity-60 ml-0.5" />
       </button>
 
