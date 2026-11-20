@@ -2,6 +2,29 @@
  * Central Permission Layer for STARK STEEL DOORS (SalesDoor Enterprise)
  * Single source of truth for Role-Based Access Control (RBAC).
  * 
+ * =========================================================================================
+ * PERMISSIONS MATRIX (Role x Permission)
+ * =========================================================================================
+ * | Role | employee.view | employee.create | employee.edit | employee.import | employee.resetPassword | employee.activate | employee.deactivate | department.create | department.edit | department.archive | designation.create | designation.edit | hierarchy.view | team.create | team.edit | team.delete | team.transferMembers | task.assignAnyone | day.unlock |
+ * | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+ * | Executive Director | Yes | Yes | Yes* | Yes | Yes* | Yes* | Yes* | Yes | Yes | Yes* | Yes | Yes | Yes | Yes | Yes | Yes* | Yes | Yes | Yes |
+ * | Director Operations | Yes | Yes | Yes* | Yes | Yes* | Yes* | Yes* | Yes | Yes | Yes* | Yes | Yes | Yes | Yes | Yes | Yes* | Yes | Yes | Yes |
+ * | General Manager | Yes | Yes | Yes | Yes | Yes | Yes | Yes | No | No | No | No | No | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+ * | HR Manager / Admin | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | No | No |
+ * | Operations Head | No | No | No | No | No | No | No | No | No | No | No | No | Yes | Ops Only | Ops Only | Ops Only | Ops Only | No | No |
+ * | CSO (Sales Officer) | No | No | No | No | No | No | No | No | No | No | No | No | Yes | No | No | No | No | No | No |
+ * | Accounts / Brand | No | No | No | No | No | No | No | No | No | No | No | No | Yes | No | No | No | No | No | No |
+ * | Supervisors (L4) | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No |
+ * | Frontline (L5/L6) | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No | No |
+ * 
+ * * Universal Safety Rules for Everyone (including Company Heads):
+ * 1. Cannot change their own role, level or designation.
+ * 2. Cannot deactivate their own account.
+ * 3. Cannot archive a department that still has active employees.
+ * 4. Cannot delete a team that still has active tasks.
+ * 5. The system must always keep at least one active company head (cannot deactivate the last one).
+ * 6. Editing or deactivating another company head requires confirmation and an audit log with reason.
+ * 
  * Scopes:
  * - "company": Universal company-wide oversight (Director Operations, Executive Director)
  * - "department": Department-wide oversight (Operations Head, CSO, Accounts Manager, Brand Manager, etc.)
@@ -34,18 +57,105 @@ export const PAGES = {
 };
 
 /**
- * 1. Single Array of All-Access Performance Roles:
- * Only roles listed here see ALL 10 departments and the department filter in Team Performance.
+ * Shared Company Head Roles (identical top authority)
  */
-export const ALL_ACCESS_PERFORMANCE_ROLES = [
+export const COMPANY_HEAD_ROLES = [
   'Executive Director',
   'Director Operations'
 ];
 
+export function isCompanyHead(userOrRole) {
+  if (!userOrRole) return false;
+  const role = typeof userOrRole === 'string' ? userOrRole : (userOrRole.role || userOrRole.designation || '');
+  return COMPANY_HEAD_ROLES.includes(role) || COMPANY_HEAD_ROLES.includes(normalizeRoleName(role));
+}
+
+/**
+ * Explicit Standard Permissions List
+ */
+export const PERMISSIONS = {
+  EMPLOYEE_VIEW: 'employee.view',
+  EMPLOYEE_CREATE: 'employee.create',
+  EMPLOYEE_EDIT: 'employee.edit',
+  EMPLOYEE_IMPORT: 'employee.import',
+  EMPLOYEE_RESET_PASSWORD: 'employee.resetPassword',
+  EMPLOYEE_ACTIVATE: 'employee.activate',
+  EMPLOYEE_DEACTIVATE: 'employee.deactivate',
+  DEPARTMENT_CREATE: 'department.create',
+  DEPARTMENT_EDIT: 'department.edit',
+  DEPARTMENT_ARCHIVE: 'department.archive',
+  DESIGNATION_CREATE: 'designation.create',
+  DESIGNATION_EDIT: 'designation.edit',
+  HIERARCHY_VIEW: 'hierarchy.view',
+  TEAM_CREATE: 'team.create',
+  TEAM_EDIT: 'team.edit',
+  TEAM_DELETE: 'team.delete',
+  TEAM_TRANSFER_MEMBERS: 'team.transferMembers',
+  TASK_ASSIGN_ANYONE: 'task.assignAnyone',
+  DAY_UNLOCK: 'day.unlock'
+};
+
+const ALL_COMPANY_HEAD_PERMISSIONS = [
+  'employee.view', 'employee.create', 'employee.edit', 'employee.import',
+  'employee.resetPassword', 'employee.activate', 'employee.deactivate',
+  'department.create', 'department.edit', 'department.archive',
+  'designation.create', 'designation.edit', 'hierarchy.view',
+  'team.create', 'team.edit', 'team.delete', 'team.transferMembers',
+  'task.assignAnyone', 'day.unlock'
+];
+
+/**
+ * Explicit role permissions map
+ */
+export const EXPLICIT_PERMISSIONS_MAP = {
+  'Executive Director': ALL_COMPANY_HEAD_PERMISSIONS,
+  'Director Operations': ALL_COMPANY_HEAD_PERMISSIONS,
+  'General Manager': [
+    'employee.view', 'employee.create', 'employee.edit', 'employee.import',
+    'employee.resetPassword', 'employee.activate', 'employee.deactivate',
+    'hierarchy.view',
+    'team.create', 'team.edit', 'team.delete', 'team.transferMembers',
+    'task.assignAnyone', 'day.unlock'
+  ],
+  'HR Manager': [
+    'employee.view', 'employee.create', 'employee.edit', 'employee.import',
+    'employee.resetPassword', 'employee.activate', 'employee.deactivate',
+    'department.create', 'department.edit', 'department.archive',
+    'designation.create', 'designation.edit', 'hierarchy.view',
+    'team.create', 'team.edit', 'team.delete', 'team.transferMembers'
+  ],
+  'Admin Manager': [
+    'employee.view', 'employee.create', 'employee.edit', 'employee.import',
+    'employee.resetPassword', 'employee.activate', 'employee.deactivate',
+    'department.create', 'department.edit', 'department.archive',
+    'designation.create', 'designation.edit', 'hierarchy.view',
+    'team.create', 'team.edit', 'team.delete', 'team.transferMembers'
+  ],
+  'HR & Admin Manager': [
+    'employee.view', 'employee.create', 'employee.edit', 'employee.import',
+    'employee.resetPassword', 'employee.activate', 'employee.deactivate',
+    'department.create', 'department.edit', 'department.archive',
+    'designation.create', 'designation.edit', 'hierarchy.view',
+    'team.create', 'team.edit', 'team.delete', 'team.transferMembers'
+  ],
+  'Operations Head': [
+    'hierarchy.view',
+    'team.create', 'team.edit', 'team.delete', 'team.transferMembers'
+  ],
+  'Chief Sales Officer': ['hierarchy.view'],
+  'CSO': ['hierarchy.view'],
+  'Accounts Manager': ['hierarchy.view'],
+  'Brand Manager': ['hierarchy.view']
+};
+
+/**
+ * Single Array of All-Access Performance Roles:
+ * Only roles listed here see ALL 10 departments and the department filter in Team Performance.
+ */
+export const ALL_ACCESS_PERFORMANCE_ROLES = COMPANY_HEAD_ROLES;
+
 export function isAllAccessPerformanceRole(user) {
-  if (!user) return false;
-  const role = user.role || '';
-  return ALL_ACCESS_PERFORMANCE_ROLES.includes(role);
+  return isCompanyHead(user);
 }
 
 /**
@@ -1006,32 +1116,91 @@ export function getAllowedManagementDepartments(user, allDepartments = []) {
   });
 }
 
-export function canManageEmployees(user) {
-  const config = getRoleConfig(user);
-  return config ? config.canManageEmployees : false;
+/**
+ * Main Central Permission Function: can(user, permission, target?)
+ * Evaluates whether `user` can perform `permission` on optional `target`.
+ * Treats COMPANY_HEAD_ROLES ("Executive Director" & "Director Operations") with identical top authority.
+ * Enforces universal safety rules 1a to 1e.
+ */
+export function can(user, permission, target = null) {
+  if (!user || !permission) return false;
+  const role = user.role || '';
+  const normRole = normalizeRoleName(role);
+  const userIsCompanyHead = isCompanyHead(user);
+
+  // Check allowed permissions for the role
+  const allowedList = EXPLICIT_PERMISSIONS_MAP[role] || EXPLICIT_PERMISSIONS_MAP[normRole];
+  if (!allowedList || !allowedList.includes(permission)) {
+    return false;
+  }
+
+  // --- UNIVERSAL SAFETY RULES (Applicable to everyone, including Company Heads) ---
+  const myId = String(user.id || user.uid || user.employeeId || '');
+  const targetId = target ? String(target.id || target.uid || target.employeeId || '') : '';
+  const isSelf = myId && targetId && myId === targetId;
+
+  // Rule 1a: Cannot change their own role, level or designation
+  if (permission === PERMISSIONS.EMPLOYEE_EDIT && isSelf && target) {
+    if (target.isRoleChange || target.roleChanged || target.newRole || target.newLevel || target.newDesignation) {
+      return false;
+    }
+  }
+
+  // Rule 1b: Cannot deactivate their own account
+  if (permission === PERMISSIONS.EMPLOYEE_DEACTIVATE && isSelf) {
+    return false;
+  }
+
+  // Rule 1c: Cannot archive a department that still has active employees
+  if (permission === PERMISSIONS.DEPARTMENT_ARCHIVE && target) {
+    const activeCount = Number(target.activeEmployeesCount ?? target.assignedCount ?? target.memberCount ?? 0);
+    if (activeCount > 0) {
+      return false;
+    }
+  }
+
+  // Rule 1d: Cannot delete a team that still has active tasks
+  if (permission === PERMISSIONS.TEAM_DELETE && target) {
+    const activeTasksCount = Number(target.activeTasksCount ?? target.taskCount ?? 0);
+    if (activeTasksCount > 0) {
+      return false;
+    }
+  }
+
+  // Rule 1e: The system must always keep at least one active company head (cannot deactivate the last one)
+  if (permission === PERMISSIONS.EMPLOYEE_DEACTIVATE && target) {
+    const targetIsCompanyHead = isCompanyHead(target);
+    if (targetIsCompanyHead) {
+      const activeHeadCount = Number(target.activeCompanyHeadsCount ?? target.companyHeadCount ?? 2);
+      if (activeHeadCount <= 1) {
+        return false;
+      }
+    }
+  }
+
+  // Operations Head restriction: Teams must be within operations division
+  if (normRole === 'Operations Head' && target && permission.startsWith('team.')) {
+    const tDept = (target.departmentId || target.department || '').toLowerCase();
+    const opsDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
+    if (tDept && !opsDepts.includes(tDept)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
-export function canManageOrgStructure(user) {
-  if (!user) return false;
-  const config = getRoleConfig(user);
-  return config ? Boolean(config.canManageOrgStructure) : false;
+export function canManageEmployees(user, target = null) {
+  return can(user, PERMISSIONS.EMPLOYEE_VIEW, target) && can(user, PERMISSIONS.EMPLOYEE_EDIT, target);
+}
+
+export function canManageOrgStructure(user, target = null) {
+  return can(user, PERMISSIONS.DEPARTMENT_EDIT, target) || can(user, PERMISSIONS.DESIGNATION_EDIT, target);
 }
 
 export function canManageTeam(user, team = null) {
   if (!user) return false;
-  const config = getRoleConfig(user);
-  if (!config) return false;
-
-  if (config.canManageTeams) {
-    if (user.role === 'Operations Head' && team) {
-      const teamDept = (team.departmentId || team.department || '').toLowerCase();
-      const allowed = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
-      return allowed.includes(teamDept);
-    }
-    return true;
-  }
-
-  return false;
+  return can(user, PERMISSIONS.TEAM_EDIT, team);
 }
 
 export function canUserAssignTo(assigner, assignee, allEmployees = [], teamMembers = []) {

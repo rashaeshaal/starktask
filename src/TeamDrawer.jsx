@@ -15,7 +15,8 @@ export default function TeamDrawer({
   members = [],
   employees = [],
   currentUser,
-  onAssignToMember
+  onAssignToMember,
+  onSelectMember
 }) {
   useEffect(() => {
     if (!isOpen) return;
@@ -139,6 +140,7 @@ export default function TeamDrawer({
                         canAssign={canAssign}
                         canRemove={false}
                         onAssign={onAssignToMember}
+                        onSelect={() => onSelectMember && onSelectMember(targetEmp)}
                       />
                     );
                   })}
@@ -153,3 +155,4 @@ export default function TeamDrawer({
     </div>
   );
 }
+

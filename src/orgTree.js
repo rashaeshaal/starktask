@@ -1,4 +1,23 @@
 /**
+ * Normalizes any department id, code, or title string into a canonical ID.
+ */
+function normalizeDept(value) {
+  if (!value) return '';
+  const str = String(value).trim().toLowerCase();
+  if (str === 'hr' || str === 'hr_admin' || str === 'hr & admin' || str === 'hr & administration') return 'hr_admin';
+  if (str === 'qc' || str === 'quality_control' || str === 'quality control') return 'qc';
+  if (str === 'exec' || str === 'management') return 'management';
+  if (str === 'fin' || str === 'finance') return 'finance';
+  if (str === 'ops' || str === 'operations') return 'operations';
+  if (str === 'wh' || str === 'warehouse') return 'warehouse';
+  if (str === 'trans' || str === 'transportation') return 'transportation';
+  if (str === 'serv' || str === 'service') return 'service';
+  if (str === 'inv' || str === 'inventory') return 'inventory';
+  if (str === 'mkt' || str === 'marketing') return 'marketing';
+  return str;
+}
+
+/**
  * Single Unified Organization Hierarchy Tree for STARK STEEL DOORS (SalesDoor Enterprise)
  * Covers all 10 departments:
  * - Executive Director → General Manager → Department Heads
@@ -218,7 +237,7 @@ export const ORG_TREE = {
 };
 
 /**
- * 10 Official Company Departments
+ * Official Company Departments
  */
 export const COMPANY_DEPARTMENTS = [
   { id: 'management', name: 'Executive Management', headRole: 'Executive Director' },
@@ -227,7 +246,7 @@ export const COMPANY_DEPARTMENTS = [
   { id: 'sales', name: 'Sales', headRole: 'Chief Sales Officer' },
   { id: 'operations', name: 'Operations', headRole: 'Operations Head' },
   { id: 'warehouse', name: 'Warehouse', headRole: 'Warehouse In-charge' },
-  { id: 'quality_control', name: 'Quality Control (QC)', headRole: 'QC Inspector' },
+  { id: 'qc', name: 'Quality Control (QC)', headRole: 'QC Inspector' },
   { id: 'transportation', name: 'Transportation', headRole: 'Transport Manager' },
   { id: 'service', name: 'Service', headRole: 'Service Manager' },
   { id: 'inventory', name: 'Inventory', headRole: 'Inventory Supervisor' },
@@ -366,29 +385,75 @@ export function validateTeamPlacement(leaderRole, memberRole, teamDepartment = n
   return { valid: true };
 }
 
+export const MIN_LEADER_LEVEL = 1;
+export const MAX_LEADER_LEVEL = 4;
+
 /**
  * Roles allowed to act as Leader for a given department
+ * Rule:
+ * - Minimum level: MIN_LEADER_LEVEL (1)
+ * - Maximum level: MAX_LEADER_LEVEL (4)
+ * - Director Operations and Executive Director: may pick leaders from L1 to L4 in ANY department, including themselves.
+ * - HR & Admin managers: may pick L1 to L4 in ANY department.
+ * - Operations Head: may pick L1 to L4 only for operational departments (Operations, Warehouse, Transportation, Service, QC, Inventory).
+ * - Department Heads: may pick leaders only inside their own department and downline.
  */
-export function getAllowedLeadersForDepartment(deptId) {
+export function getAllowedLeadersForDepartment(deptId, creatorUser = null) {
   if (!deptId) return [];
-  const normalizedDept = deptId.toLowerCase();
+  const normalizedDept = normalizeDept(deptId);
+
+  const creatorRole = creatorUser ? normalizeRole(creatorUser.role) : '';
+  const creatorDept = creatorUser ? normalizeDept(creatorUser.department || creatorUser.departmentId) : '';
+
+  const isExecutiveLeadership = creatorRole === 'Executive Director' || creatorRole === 'Director Operations' || creatorRole === 'General Manager';
+  const isHRLeadership = creatorRole === 'HR Manager' || creatorRole === 'Admin Manager' || creatorRole === 'HR & Admin Manager' || creatorDept === 'hr_admin';
+  const isOpsHead = creatorRole === 'Operations Head';
+
+  const operationalDepts = ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'];
 
   const matching = Object.entries(ORG_TREE)
     .filter(([role, config]) => {
-      // Management roles can lead any team
-      if (config.department === 'management') return true;
+      // 1. Level constraint: Must be between MIN_LEADER_LEVEL (1) and MAX_LEADER_LEVEL (4)
+      const lvl = config.level;
+      if (lvl === undefined || lvl < MIN_LEADER_LEVEL || lvl > MAX_LEADER_LEVEL) {
+        return false;
+      }
 
-      // Operations head can lead operations, warehouse, transportation, service, inventory, qc
-      if (role === 'Operations Head' && ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'].includes(normalizedDept)) {
+      // If no creatorUser provided (backward compatibility), return roles matching standard hierarchy
+      if (!creatorUser) {
+        if (config.department === 'management') return true;
+        if (role === 'Operations Head' && operationalDepts.includes(normalizedDept)) return true;
+        const isDept = config.department === normalizedDept || 
+                       (normalizedDept === 'hr_admin' && (config.department === 'hr_admin' || config.department === 'hr')) ||
+                       (normalizedDept === 'operations' && operationalDepts.includes(config.department));
+        return isDept;
+      }
+
+      // 2. Creator Permission Scopes:
+      // A) Executive Director, Director Operations, GM: Can pick leaders from L1 to L4 in ANY department
+      if (isExecutiveLeadership) {
         return true;
       }
 
-      // Department match and level <= 4 (must be a manager/supervisor role, not frontline staff)
-      const isDept = config.department === normalizedDept || 
-                     (normalizedDept === 'hr_admin' && (config.department === 'hr_admin' || config.department === 'hr')) ||
-                     (normalizedDept === 'operations' && ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'].includes(config.department));
-      
-      return isDept && config.level <= 4 && (config.children || []).length > 0;
+      // B) HR & Admin managers: Can pick L1 to L4 in ANY department
+      if (isHRLeadership) {
+        return true;
+      }
+
+      // C) Operations Head: May pick L1 to L4 only for operational departments
+      if (isOpsHead) {
+        if (!operationalDepts.includes(normalizedDept)) {
+          return false;
+        }
+        return config.department === 'management' || 
+               operationalDepts.includes(config.department) || 
+               operationalDepts.includes(normalizedDept);
+      }
+
+      // D) Department Heads: May pick leaders only inside their own department and downline
+      const isSameDept = config.department === creatorDept || config.department === normalizedDept;
+      const isDownline = isDownlineRole(creatorRole, role);
+      return isSameDept && (isDownline || role === creatorRole);
     })
     .map(([role]) => role);
 

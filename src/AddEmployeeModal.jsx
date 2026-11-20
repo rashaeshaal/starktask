@@ -6,7 +6,9 @@ import {
 } from 'lucide-react';
 import { apiCreateEmployee } from './firebase';
 import { COMPANY_DEPARTMENTS, ORG_TREE, getParentRole, getRoleLevel } from './orgTree';
-import { canManageEmployees } from './permissions';
+import { can, PERMISSIONS } from './permissions';
+import { useDepartments } from './useDepartments';
+import { writeAuditLog } from './firestoreService';
 import { ENTERPRISE_EMPLOYEE_DIRECTORY } from './employeeDirectory';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
@@ -99,7 +101,10 @@ export default function AddEmployeeModal({
   onOpenInlineAddDept,
   onOpenInlineAddDesignation
 }) {
-  const isAuthorized = canManageEmployees(currentUser);
+  const { departments: activeDepts } = useDepartments();
+  const deptList = (activeDepts && activeDepts.length > 0) ? activeDepts : (departments.length > 0 ? departments : COMPANY_DEPARTMENTS);
+
+  const isAuthorized = can(currentUser, PERMISSIONS.EMPLOYEE_CREATE);
 
   // Form Fields
   const [employeeId, setEmployeeId] = useState('');
@@ -321,6 +326,21 @@ export default function AddEmployeeModal({
         id: res.data?.uid || `emp_${Date.now()}`,
         ...payload
       };
+
+      // Write audit log for employee creation
+      await writeAuditLog({
+        actorId: currentUser?.id || currentUser?.uid || 'system',
+        action: 'EMPLOYEE_CREATE',
+        targetId: createdUser.id,
+        before: null,
+        after: {
+          fullName: payload.fullName,
+          email: payload.email,
+          role: payload.role,
+          department: payload.department
+        },
+        reason: 'New employee created'
+      });
 
       if (onEmployeeAdded) {
         onEmployeeAdded(createdUser);
@@ -550,7 +570,7 @@ export default function AddEmployeeModal({
                 onChange={(e) => setDepartment(e.target.value)}
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#05331F] bg-white cursor-pointer"
               >
-                {COMPANY_DEPARTMENTS.map(d => (
+                {deptList.map(d => (
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>

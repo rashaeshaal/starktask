@@ -67,25 +67,27 @@ export default function TeamModal({
     return () => document.removeEventListener('keydown', handleKey);
   }, [isOpen, onClose]);
 
-  // Eligible leaders for currently chosen department (using normalized roles so all department leaders appear)
+  // Eligible leaders for currently chosen department (using getAllowedLeadersForDepartment with creatorUser permissions)
   const eligibleLeaders = useMemo(() => {
-    const rawAllowedRoles = getAllowedLeadersForDepartment(teamDept);
+    const rawAllowedRoles = getAllowedLeadersForDepartment(teamDept, currentUser);
     const normalizedAllowed = new Set(rawAllowedRoles.map(r => normalizeRole(r)));
 
     return employees.filter(emp => {
-      const empDept = (emp.department || emp.departmentId || '').toLowerCase();
-      const normDept = (teamDept || '').toLowerCase();
-      const empNormRole = normalizeRole(emp.role);
+      // Exclude inactive employees
+      const status = (emp.status || emp.employmentStatus || 'active').toLowerCase();
+      if (status === 'inactive') return false;
 
-      const matchesDept = 
-        empDept === normDept || 
-        empDept === 'management' ||
-        empNormRole === 'Operations Head' || 
-        ['Executive Director', 'Director Operations', 'General Manager'].includes(empNormRole);
+      const empRole = emp.role || emp.designation || '';
+      const empNormRole = normalizeRole(empRole);
+      const empLevel = getRoleLevel(empRole);
 
-      return matchesDept && normalizedAllowed.has(empNormRole);
+      // Must have valid level between 1 and 4
+      if (empLevel < 1 || empLevel > 4) return false;
+
+      // Role must be authorized by getAllowedLeadersForDepartment
+      return normalizedAllowed.has(empNormRole);
     });
-  }, [teamDept, employees]);
+  }, [teamDept, employees, currentUser]);
 
   const leaderObj = useMemo(() => {
     return employees.find(e => String(e.id || e.employeeId) === String(teamLeaderId));
@@ -283,6 +285,12 @@ export default function TeamModal({
                   </option>
                 ))}
               </select>
+              {eligibleLeaders.length === 0 && (
+                <p className="text-[11px] text-amber-600 mt-1 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                  <span>No eligible leaders found for this department (Requires Level 1-4 authorized supervisor).</span>
+                </p>
+              )}
             </div>
 
             <div>

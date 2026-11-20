@@ -25,6 +25,17 @@ export function formatName(str) {
 }
 
 /**
+ * Get 1-2 character initials for avatars
+ * e.g. "Abdul Majeed" -> "AM", "Shamna" -> "SH"
+ */
+export function getInitials(name) {
+  if (!name) return 'EM';
+  const parts = String(name).trim().split(/\s+/);
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  return String(name).trim().slice(0, 2).toUpperCase();
+}
+
+/**
  * Humanize department codes to display names
  * e.g. "HR_ADMIN" -> "HR & Admin", "MANAGEMENT" -> "Management"
  */
@@ -113,8 +124,10 @@ export const LEVEL_STYLES = {
  * Matches reportingManagerId / reportsTo against both e.id ('emp_100') and e.employeeId ('100').
  * Falls back to department level / nearest higher-level person if missing.
  * Prevents loops and self-references.
+ * Configurable tree root: if `rootEmployeeId` is provided (e.g. from `org.rootEmployeeId` in Firestore settings),
+ * that employee becomes the primary apex node.
  */
-export function buildHierarchy(employees = []) {
+export function buildHierarchy(employees = [], rootEmployeeId = null) {
   if (!employees || employees.length === 0) {
     return { rootNodes: [], orphanNodes: [] };
   }
@@ -201,21 +214,36 @@ export function buildHierarchy(employees = []) {
   // Pass 2: Employees not yet assigned
   const unattached = allNodes.filter(n => !assigned.has(n._id));
 
-  // Determine organizational apex (L1 nodes)
-  const l1Nodes = unattached.filter(n => {
-    const role = (n.designation || n.role || '').toLowerCase();
-    return n.level === 1 || role.includes('director') || role.includes('general manager');
-  });
+  // Determine primary root (configurable via rootEmployeeId or fallback to lowest level)
+  let primaryRoot = null;
+  if (rootEmployeeId) {
+    const rootKey = String(rootEmployeeId).trim().toLowerCase();
+    primaryRoot = allNodes.find(n => 
+      String(n._id).toLowerCase() === rootKey || 
+      String(n._empNum).toLowerCase() === rootKey || 
+      String(n.id || '').toLowerCase() === rootKey || 
+      String(n.employeeId || '').toLowerCase() === rootKey ||
+      (n.role && n.role.toLowerCase() === rootKey) ||
+      (n.designation && n.designation.toLowerCase() === rootKey) ||
+      (n.fullName && n.fullName.toLowerCase() === rootKey)
+    );
+  }
 
-  // Pick primary root (e.g. Managing Director or first L1)
-  let primaryRoot = l1Nodes.find(n => {
-    const r = (n.designation || n.role || '').toLowerCase();
-    return r.includes('managing') || r.includes('executive');
-  }) || l1Nodes[0];
+  // Fallback root determination if not specified by config
+  if (!primaryRoot) {
+    const l1Nodes = unattached.filter(n => {
+      const role = (n.designation || n.role || '').toLowerCase();
+      return n.level === 1 || role.includes('director') || role.includes('general manager');
+    });
 
-  if (!primaryRoot && allNodes.length > 0) {
-    // If no explicit L1, pick node with lowest level number
-    primaryRoot = [...allNodes].sort((a, b) => a.level - b.level)[0];
+    primaryRoot = l1Nodes.find(n => {
+      const r = (n.designation || n.role || '').toLowerCase();
+      return r.includes('managing') || r.includes('executive');
+    }) || l1Nodes[0];
+
+    if (!primaryRoot && allNodes.length > 0) {
+      primaryRoot = [...allNodes].sort((a, b) => a.level - b.level)[0];
+    }
   }
 
   if (primaryRoot && !assigned.has(primaryRoot._id)) {
@@ -223,8 +251,9 @@ export function buildHierarchy(employees = []) {
     assigned.add(primaryRoot._id);
   }
 
-  // Pass 3: Attach remaining unattached L1s directly to primary root or as additional roots
-  l1Nodes.forEach(n => {
+  // Pass 3: Attach remaining unattached L1/L2 company heads directly to primary root or as additional roots
+  const unattachedHeads = allNodes.filter(n => !assigned.has(n._id) && (n.level <= 2 || (n.role && n.role.toLowerCase().includes('director'))));
+  unattachedHeads.forEach(n => {
     if (!assigned.has(n._id)) {
       if (primaryRoot && primaryRoot._id !== n._id) {
         primaryRoot.children.push(n);

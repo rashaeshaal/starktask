@@ -12,9 +12,11 @@ import {
 import { 
   canManageTeam, 
   isGlobalTeamManager, 
-  getAllowedManagementDepartments 
+  getAllowedManagementDepartments,
+  can,
+  PERMISSIONS 
 } from './permissions';
-import { COMPANY_DEPARTMENTS } from './orgTree';
+import { useDepartments } from './useDepartments';
 import { useToast } from './ToastContext';
 
 // Modular Sub-components
@@ -25,6 +27,7 @@ import TeamDrawer from './TeamDrawer';
 import TeamModal from './TeamModal';
 import DeleteTeamModal from './DeleteTeamModal';
 import OrgChartTree from './OrgChartTree';
+import EmployeeProfileDrawer from './EmployeeProfileDrawer';
 
 export default function TeamManagementView({ 
   teams = [], 
@@ -51,6 +54,7 @@ export default function TeamManagementView({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState(null);
   const [drawerTeam, setDrawerTeam] = useState(null);
+  const [profileEmployee, setProfileEmployee] = useState(null);
   const [deletingTeam, setDeletingTeam] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -58,17 +62,19 @@ export default function TeamManagementView({
   const isGlobalManager = isGlobalTeamManager(currentUser);
   const canUserManageAny = canManageTeam(currentUser);
 
-  // Departments user is authorized to manage
+  const { departments: activeDepts } = useDepartments();
+
+  // Departments user is authorized to manage (driven by dynamic departments hook)
   const allowedManageDepts = useMemo(() => {
-    const rawDepts = getAllowedManagementDepartments(currentUser, COMPANY_DEPARTMENTS);
+    const rawDepts = getAllowedManagementDepartments(currentUser, activeDepts);
     return rawDepts.map(d => {
       if (typeof d === 'object' && d !== null) {
         return { id: d.id || d.name, name: d.name || d.id };
       }
-      const matched = COMPANY_DEPARTMENTS.find(cd => cd.id === d);
+      const matched = activeDepts.find(cd => cd.id === d);
       return { id: d, name: matched ? matched.name : d };
     });
-  }, [currentUser]);
+  }, [currentUser, activeDepts]);
 
   // Filtered teams list based on hierarchy & permissions
   const visibleTeams = useMemo(() => {
@@ -158,6 +164,13 @@ export default function TeamManagementView({
 
   // Confirm Delete Team
   const handleConfirmDelete = async (team) => {
+    // Check permission including active tasks restriction for Director Operations
+    if (!can(currentUser, PERMISSIONS.TEAM_DELETE, team)) {
+      showToast(`Restriction: Squad "${team.name}" cannot be deleted because it still has active tasks or you do not have permission.`, 'error');
+      setDeletingTeam(null);
+      return;
+    }
+
     setIsDeleting(true);
     try {
       await updateTeam(team.id, { status: 'deleted' }, currentUser);
@@ -210,7 +223,7 @@ export default function TeamManagementView({
             onDepartmentFilterChange={setSelectedDeptFilter}
             statusFilter={selectedStatusFilter}
             onStatusFilterChange={setSelectedStatusFilter}
-            departments={COMPANY_DEPARTMENTS}
+            departments={activeDepts}
             totalCount={teams.length}
             filteredCount={visibleTeams.length}
             onResetFilters={handleResetFilters}
@@ -290,7 +303,7 @@ export default function TeamManagementView({
         <OrgChartTree
           employees={employees}
           currentUserId={currentUserId}
-          onSelectEmployee={(emp) => {}}
+          onSelectEmployee={(emp) => setProfileEmployee(emp)}
         />
       )}
 
@@ -302,11 +315,24 @@ export default function TeamManagementView({
         members={teamMembers.filter(m => m.teamId === drawerTeam?.id && m.status === 'active')}
         employees={employees}
         currentUser={currentUser}
+        onSelectMember={(emp) => setProfileEmployee(emp)}
         onAssignToMember={(m) => {
           if (onOpenAssignModal) {
             onOpenAssignModal({ teamId: drawerTeam?.id, memberId: m.userId || m.id });
           }
         }}
+      />
+
+      <EmployeeProfileDrawer
+        isOpen={Boolean(profileEmployee)}
+        onClose={() => setProfileEmployee(null)}
+        employee={profileEmployee}
+        currentUser={currentUser}
+        reportingManager={employees.find(e => 
+          String(e.id || e.employeeId) === String(profileEmployee?.reportsTo || profileEmployee?.reportingManagerId)
+        )}
+        isMe={String(profileEmployee?.id || profileEmployee?.employeeId) === String(currentUserId)}
+        isHR={currentUser?.role === 'HR Manager' || currentUser?.role === 'HR & Admin Manager'}
       />
 
       <TeamModal

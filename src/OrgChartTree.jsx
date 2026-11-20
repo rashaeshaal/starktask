@@ -4,7 +4,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, X, ChevronDown, ChevronRight, Sparkles, Building2 } from 'lucide-react';
 import { formatName, formatDepartment, LEVEL_STYLES } from './orgHelpers';
-import { COMPANY_DEPARTMENTS, getRoleLevel } from './orgTree';
+import { getRoleLevel } from './orgTree';
+import { useDepartments } from './useDepartments';
 
 export default function OrgChartTree({
   employees = [],
@@ -27,9 +28,11 @@ export default function OrgChartTree({
 
   const selfNodeRef = useRef(null);
 
-  // Group employees by department
+  const { departments: activeDepts } = useDepartments();
+
+  // Group employees by department dynamically
   const deptsData = useMemo(() => {
-    return COMPANY_DEPARTMENTS.map(dept => {
+    return activeDepts.map(dept => {
       const staff = employees.filter(e => {
         const eDept = (e.department || e.departmentId || '').toLowerCase().trim();
         return eDept === dept.id.toLowerCase() || eDept.includes(dept.id.toLowerCase());
@@ -45,7 +48,7 @@ export default function OrgChartTree({
         staff
       };
     });
-  }, [employees]);
+  }, [employees, activeDepts]);
 
   const toggleDept = (deptId) => {
     setExpandedDepts(prev => ({ ...prev, [deptId]: !prev[deptId] }));
@@ -252,3 +255,4 @@ export default function OrgChartTree({
     </div>
   );
 }
+

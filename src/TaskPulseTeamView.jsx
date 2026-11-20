@@ -229,14 +229,21 @@ export default function TaskPulseTeamView({
   const handleToggleTaskComplete = async (task, e) => {
     e?.stopPropagation();
     const prevStatus = task.status;
-    const isCompleted = prevStatus === TASK_STATUSES.COMPLETED || prevStatus === 'Completed';
+    const isCompleted = (String(prevStatus).toLowerCase() === 'completed') || 
+                        prevStatus === TASK_STATUSES.COMPLETED || 
+                        task.progressPercentage === 100 || 
+                        Boolean(task.completed);
+
     const nextStatus = isCompleted ? TASK_STATUSES.IN_PROGRESS : TASK_STATUSES.COMPLETED;
     const nextProgress = isCompleted ? 50 : 100;
+    const timestamp = new Date().toISOString();
 
     const optimistic = {
       ...task,
       status: nextStatus,
-      progressPercentage: nextProgress
+      progressPercentage: nextProgress,
+      completed: !isCompleted,
+      completedAt: !isCompleted ? timestamp : null
     };
 
     if (onTaskUpdated) onTaskUpdated(optimistic);
@@ -245,6 +252,8 @@ export default function TaskPulseTeamView({
       await updateFirestoreTask(task.id, {
         status: nextStatus,
         progressPercentage: nextProgress,
+        completed: !isCompleted,
+        completedAt: !isCompleted ? timestamp : null,
         auditAction: 'STATUS_TOGGLED',
         auditDetails: `Task marked as ${nextStatus}`
       }, currentUser);
@@ -258,18 +267,25 @@ export default function TaskPulseTeamView({
 
   // Optimistic Status Change from Dropdown
   const handleStatusChange = async (task, newStatus) => {
+    const isTargetComplete = newStatus === TASK_STATUSES.COMPLETED || String(newStatus).toLowerCase() === 'completed';
+    const isCurrentComplete = task.status === TASK_STATUSES.COMPLETED || String(task.status).toLowerCase() === 'completed';
     if (task.status === newStatus) return;
+
     const prevStatus = task.status;
 
     let nextProgress = task.progressPercentage || 0;
-    if (newStatus === TASK_STATUSES.COMPLETED) nextProgress = 100;
+    if (isTargetComplete) nextProgress = 100;
     else if (newStatus === TASK_STATUSES.PENDING_REVIEW) nextProgress = 90;
     else if (newStatus === TASK_STATUSES.IN_PROGRESS) nextProgress = Math.max(30, nextProgress);
+    else if (isCurrentComplete && !isTargetComplete && nextProgress === 100) nextProgress = 50;
 
+    const timestamp = new Date().toISOString();
     const optimistic = {
       ...task,
       status: newStatus,
-      progressPercentage: nextProgress
+      progressPercentage: nextProgress,
+      completed: isTargetComplete,
+      completedAt: isTargetComplete ? (task.completedAt || timestamp) : null
     };
 
     if (onTaskUpdated) onTaskUpdated(optimistic);
@@ -278,6 +294,8 @@ export default function TaskPulseTeamView({
       await updateFirestoreTask(task.id, {
         status: newStatus,
         progressPercentage: nextProgress,
+        completed: isTargetComplete,
+        completedAt: isTargetComplete ? (task.completedAt || timestamp) : null,
         auditAction: 'STATUS_CHANGED',
         auditDetails: `Status changed from ${prevStatus} to ${newStatus}`
       }, currentUser);

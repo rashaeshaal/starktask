@@ -6,12 +6,14 @@ import {
   MoreHorizontal, Edit, KeyRound, Trash2, Mail, Check, Copy
 } from 'lucide-react';
 import { useToast } from './ToastContext';
-import { formatName, formatEmpId, formatDepartment, DEPT_DOT_COLORS } from './orgHelpers';
+import { formatName, formatEmpId, formatDepartment, DEPT_DOT_COLORS, getInitials } from './orgHelpers';
+import { can, PERMISSIONS } from './permissions';
 
 export default function EmployeeCard({
   employee,
   isMe = false,
   isHR = false,
+  currentUser = null,
   onSelect,
   onEdit,
   onResetPassword,
@@ -35,13 +37,13 @@ export default function EmployeeCard({
   // Check if role name is redundant (identical to display name)
   const isRedundantRole = roleName.trim().toLowerCase() === displayName.trim().toLowerCase();
 
-  // Format initials
-  const getInitials = (name) => {
-    if (!name) return 'ST';
-    const parts = name.trim().split(' ');
-    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  };
+  const canEdit = currentUser ? can(currentUser, PERMISSIONS.EMPLOYEE_EDIT, employee) : isHR;
+  const canReset = currentUser ? can(currentUser, PERMISSIONS.EMPLOYEE_RESET_PASSWORD, employee) : isHR;
+  const canToggle = currentUser 
+    ? (isActive ? can(currentUser, PERMISSIONS.EMPLOYEE_DEACTIVATE, employee) : can(currentUser, PERMISSIONS.EMPLOYEE_ACTIVATE, employee))
+    : isHR;
+
+  const showActionsMenu = canEdit || canReset || canToggle;
 
   // Outside click & ESC listener
   useEffect(() => {
@@ -137,14 +139,14 @@ export default function EmployeeCard({
               <span>{isActive ? 'Active' : 'Inactive'}</span>
             </span>
 
-            {isHR && (
+            {showActionsMenu && (
               <div className="relative" ref={menuRef} onClick={(e) => e.stopPropagation()}>
                 <button
                   ref={btnRef}
                   type="button"
                   onClick={toggleMenu}
                   aria-label="Actions menu"
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
                 >
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
@@ -153,33 +155,41 @@ export default function EmployeeCard({
                   <div className={`absolute right-0 w-44 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-30 animate-in fade-in zoom-in-95 duration-100 ${
                     openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
                   }`}>
-                    <button
-                      type="button"
-                      onClick={() => { setIsMenuOpen(false); onEdit && onEdit(employee); }}
-                      className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                    >
-                      <Edit className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Edit Details</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setIsMenuOpen(false); onResetPassword && onResetPassword(employee); }}
-                      className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                    >
-                      <KeyRound className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Reset Password</span>
-                    </button>
-                    <div className="h-px bg-slate-100 my-1" />
-                    <button
-                      type="button"
-                      onClick={() => { setIsMenuOpen(false); onToggleStatus && onToggleStatus(employee); }}
-                      className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2 ${
-                        isActive ? 'text-rose-600 hover:bg-rose-50' : 'text-emerald-700 hover:bg-emerald-50'
-                      }`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>{isActive ? 'Deactivate' : 'Activate'} Employee</span>
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => { setIsMenuOpen(false); onEdit && onEdit(employee); }}
+                        className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                      >
+                        <Edit className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Edit Details</span>
+                      </button>
+                    )}
+                    {canReset && (
+                      <button
+                        type="button"
+                        onClick={() => { setIsMenuOpen(false); onResetPassword && onResetPassword(employee); }}
+                        className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Reset Password</span>
+                      </button>
+                    )}
+                    {canToggle && (
+                      <>
+                        <div className="h-px bg-slate-100 my-1" />
+                        <button
+                          type="button"
+                          onClick={() => { setIsMenuOpen(false); onToggleStatus && onToggleStatus(employee); }}
+                          className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2 cursor-pointer ${
+                            isActive ? 'text-rose-600 hover:bg-rose-50' : 'text-emerald-700 hover:bg-emerald-50'
+                          }`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>{isActive ? 'Deactivate' : 'Activate'} Employee</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

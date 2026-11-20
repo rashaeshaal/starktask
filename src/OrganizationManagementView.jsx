@@ -6,8 +6,10 @@ import {
   X, Loader2, Download, ArrowDownRight, Network, Archive, RefreshCw
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { canManageEmployees, canManageOrgStructure } from './permissions';
+import { canManageEmployees, canManageOrgStructure, can, PERMISSIONS, isCompanyHead, COMPANY_HEAD_ROLES } from './permissions';
 import { COMPANY_DEPARTMENTS, ORG_TREE, getRoleLevel } from './orgTree';
+import { useDepartments } from './useDepartments';
+import { writeAuditLog } from './firestoreService';
 import { apiCreateEmployee, apiSetEmployeeStatus, apiResetEmployeePassword } from './firebase';
 import EditEmployeeModal from './EditEmployeeModal';
 import EditDesignationModal from './EditDesignationModal';
@@ -65,20 +67,13 @@ export default function OrganizationManagementView({
   // Modern Toast Context
   const { showToast, confirm } = useToast();
 
-  const isHR = canManageEmployees(currentUser);
+  const deptHook = useDepartments();
+  const allDepartments = deptHook.allDepartments;
+  const activeDepartments = deptHook.departments;
+
+  const isHR = can(currentUser, PERMISSIONS.EMPLOYEE_VIEW);
   const canManageOrg = canManageOrgStructure(currentUser);
   const currentUserId = currentUser?.id || currentUser?.uid || currentUser?.employeeId;
-
-  // Merge default COMPANY_DEPARTMENTS with Firestore departments
-  const allDepartments = useMemo(() => {
-    const map = new Map();
-    COMPANY_DEPARTMENTS.forEach(d => map.set(d.id, { ...d, status: 'active' }));
-    departments.forEach(d => {
-      const id = d.id || (d.code || '').toLowerCase();
-      map.set(id, { ...map.get(id), ...d });
-    });
-    return Array.from(map.values());
-  }, [departments]);
 
   // Filtered employees for directory
   const filteredEmployees = useMemo(() => {
@@ -115,10 +110,38 @@ export default function OrganizationManagementView({
   const handleToggleEmployeeStatus = async (emp) => {
     const curStatus = emp.status || emp.employmentStatus || 'active';
     const nextStatus = curStatus === 'active' ? 'inactive' : 'active';
+    const requiredPerm = nextStatus === 'inactive' ? PERMISSIONS.EMPLOYEE_DEACTIVATE : PERMISSIONS.EMPLOYEE_ACTIVATE;
+
+    // Check count of active company heads if attempting to deactivate a company head
+    const targetIsCompanyHead = isCompanyHead(emp);
+    const activeHeadCount = employees.filter(e => 
+      isCompanyHead(e) && (e.status || e.employmentStatus || 'active').toLowerCase() !== 'inactive'
+    ).length;
+
+    if (nextStatus === 'inactive' && targetIsCompanyHead && activeHeadCount <= 1) {
+      showToast('Safety Rule: The system must always keep at least one active company head. Cannot deactivate the last company head.', 'error');
+      return;
+    }
+
+    if (!can(currentUser, requiredPerm, { ...emp, activeCompanyHeadsCount: activeHeadCount })) {
+      showToast(`Permission denied: You are not authorized to ${nextStatus === 'inactive' ? 'deactivate' : 'activate'} this user.`, 'error');
+      return;
+    }
+
+    // Special modal / prompt for deactivating another company head
+    let auditReason = `Status changed to ${nextStatus}`;
+    if (targetIsCompanyHead && nextStatus === 'inactive') {
+      const reasonInput = prompt(`DEACTIVATING COMPANY HEAD (${emp.fullName || emp.name}): Please enter an operational justification/reason for the audit log:`);
+      if (!reasonInput || !reasonInput.trim()) {
+        showToast('Action cancelled: Reason is strictly required when altering a company head account.', 'warning');
+        return;
+      }
+      auditReason = reasonInput.trim();
+    }
 
     const confirmed = await confirm({
       title: `${nextStatus === 'inactive' ? 'Deactivate' : 'Activate'} Employee`,
-      message: `Are you sure you want to ${nextStatus === 'inactive' ? 'deactivate' : 'activate'} ${emp.fullName || emp.name}?`,
+      message: `Are you sure you want to ${nextStatus === 'inactive' ? 'deactivate' : 'activate'} ${emp.fullName || emp.name}?${targetIsCompanyHead ? ' (COMPANY HEAD ACCOUNT)' : ''}`,
       confirmText: nextStatus === 'inactive' ? 'Deactivate' : 'Activate',
       type: nextStatus === 'inactive' ? 'danger' : 'info'
     });
@@ -127,6 +150,17 @@ export default function OrganizationManagementView({
     try {
       await apiSetEmployeeStatus({ uid: emp.id, status: nextStatus });
       await updateDoc(doc(db, 'users', emp.id), { status: nextStatus, employmentStatus: nextStatus });
+      
+      // Write audit log
+      await writeAuditLog({
+        actorId: currentUserId,
+        action: nextStatus === 'inactive' ? 'EMPLOYEE_DEACTIVATE' : 'EMPLOYEE_ACTIVATE',
+        targetId: emp.id,
+        before: { status: curStatus, role: emp.role },
+        after: { status: nextStatus, role: emp.role },
+        reason: auditReason
+      });
+
       if (onEmployeeUpdated) {
         onEmployeeUpdated({ ...emp, status: nextStatus, employmentStatus: nextStatus });
       }
@@ -139,6 +173,11 @@ export default function OrganizationManagementView({
 
   // Quick Password Reset Prompt
   const handleQuickResetPassword = async (emp) => {
+    if (!can(currentUser, PERMISSIONS.EMPLOYEE_RESET_PASSWORD, emp)) {
+      showToast('Permission denied: You cannot reset password for this user.', 'error');
+      return;
+    }
+
     const newPwd = prompt(`Enter new password for ${emp.fullName || emp.name} (min 8 chars):`);
     if (!newPwd) return;
     if (newPwd.length < 8) {
@@ -152,6 +191,17 @@ export default function OrganizationManagementView({
         newPassword: newPwd,
         requirePasswordChange: true
       });
+
+      // Write audit log
+      await writeAuditLog({
+        actorId: currentUserId,
+        action: 'EMPLOYEE_RESET_PASSWORD',
+        targetId: emp.id,
+        before: null,
+        after: { passwordReset: true },
+        reason: 'Password reset via directory quick action'
+      });
+
       showToast('Password reset successfully. User must change it on login.', 'success');
     } catch (err) {
       console.error('Reset password error:', err);
@@ -167,11 +217,22 @@ export default function OrganizationManagementView({
 
   // Archive Department (A department with active employees cannot be deleted, only archived)
   const handleArchiveDepartment = async (dept) => {
-    const memberCount = employees.filter(e => (e.department || e.departmentId || '').toLowerCase() === dept.id.toLowerCase()).length;
-    if (memberCount > 0 && dept.status !== 'archived') {
+    const activeMemberCount = employees.filter(e => {
+      const eDept = (e.department || e.departmentId || '').toLowerCase();
+      const eStatus = (e.status || e.employmentStatus || 'active').toLowerCase();
+      return eDept === dept.id.toLowerCase() && eStatus !== 'inactive';
+    }).length;
+
+    // Strict Director Operations check: cannot archive if active employees exist
+    if (!can(currentUser, PERMISSIONS.DEPARTMENT_ARCHIVE, { ...dept, activeEmployeesCount: activeMemberCount })) {
+      showToast(`Restriction: Department "${dept.name}" cannot be archived because it still has ${activeMemberCount} active employees.`, 'error');
+      return;
+    }
+
+    if (activeMemberCount > 0 && dept.status !== 'archived') {
       const confirmed = await confirm({
         title: 'Archive Department',
-        message: `"${dept.name}" has ${memberCount} assigned employees. It cannot be deleted, but it will be archived. Proceed?`,
+        message: `"${dept.name}" has ${activeMemberCount} assigned employees. It cannot be deleted, but it will be archived. Proceed?`,
         confirmText: 'Archive Department',
         type: 'warning'
       });
@@ -180,6 +241,17 @@ export default function OrganizationManagementView({
 
     const nextStatus = dept.status === 'archived' ? 'active' : 'archived';
     await updateDoc(doc(db, 'departments', dept.id), { status: nextStatus });
+
+    // Write audit log
+    await writeAuditLog({
+      actorId: currentUserId,
+      action: 'DEPARTMENT_ARCHIVE',
+      targetId: dept.id,
+      before: { status: dept.status || 'active' },
+      after: { status: nextStatus },
+      reason: `Department status changed to ${nextStatus}`
+    });
+
     showToast(`Department "${dept.name}" ${nextStatus === 'archived' ? 'archived' : 'activated'}.`, 'success');
   };
 
@@ -472,7 +544,7 @@ export default function OrganizationManagementView({
             onDepartmentFilterChange={setSelectedDeptFilter}
             statusFilter={selectedStatusFilter}
             onStatusFilterChange={setSelectedStatusFilter}
-            departments={allDepartments}
+            departments={activeDepartments}
             totalCount={employees.length}
             filteredCount={filteredEmployees.length}
             onResetFilters={handleResetFilters}
@@ -491,7 +563,7 @@ export default function OrganizationManagementView({
               <button
                 type="button"
                 onClick={handleResetFilters}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
               >
                 Reset filters
               </button>
@@ -505,6 +577,7 @@ export default function OrganizationManagementView({
                     employee={emp}
                     isMe={(emp.id || emp.employeeId) === currentUserId}
                     isHR={isHR}
+                    currentUser={currentUser}
                     onSelect={(e) => setProfileDrawerEmployee(e)}
                     onEdit={(e) => setEditingEmployee(e)}
                     onResetPassword={handleQuickResetPassword}
@@ -631,6 +704,7 @@ export default function OrganizationManagementView({
         isOpen={Boolean(profileDrawerEmployee)}
         onClose={() => setProfileDrawerEmployee(null)}
         employee={profileDrawerEmployee}
+        currentUser={currentUser}
         reportingManager={employees.find(e => 
           String(e.id || e.employeeId) === String(profileDrawerEmployee?.reportsTo || profileDrawerEmployee?.reportingManagerId)
         )}

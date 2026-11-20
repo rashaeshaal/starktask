@@ -1,4 +1,5 @@
 import { ROLE_HIERARCHY_LEVELS, getReportees } from './orgStructure';
+import { can, PERMISSIONS } from './permissions';
 
 /**
  * Access Control Evaluator based on:
@@ -195,7 +196,12 @@ export function canApproveTask(user, task) {
 export function isTaskLockedForUser(user, task) {
   if (!task) return false;
 
-  // Top Leadership can override/unlock
+  // Check centralized permission layer for day unlock capability
+  if (can(user, PERMISSIONS.DAY_UNLOCK, task)) {
+    return false;
+  }
+
+  // Top Leadership fallback check
   const userRole = user?.role || '';
   if (userRole === 'Executive Director' || userRole === 'Director Operations' || userRole === 'General Manager') {
     return false;

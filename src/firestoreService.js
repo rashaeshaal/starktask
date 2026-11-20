@@ -22,11 +22,36 @@ export const DEPTS_COL = 'departments';
 export const DESIGNATIONS_COL = 'designations';
 export const TASKS_COL = 'tasks';
 export const AUDIT_COL = 'taskAuditLogs';
+export const AUDIT_LOGS_COL = 'auditLogs';
 export const NOTIFS_COL = 'notifications';
 export const RECURRING_COL = 'recurringTasks';
 export const ORG_SETTINGS_COL = 'organizationSettings';
 export const DEALERS_COL = 'dealers';
 export const DEALER_BOOKINGS_COL = 'dealerBookings';
+
+/**
+ * Audit log write helper for sensitive operations:
+ * Writes to `auditLogs` collection (actorId, action, targetId, before, after, reason, timestamp)
+ */
+export async function writeAuditLog({ actorId, action, targetId, before = null, after = null, reason = '' }) {
+  try {
+    const payload = {
+      actorId: String(actorId || 'system'),
+      action: String(action || 'UNKNOWN_ACTION'),
+      targetId: String(targetId || ''),
+      before: before || null,
+      after: after || null,
+      reason: String(reason || ''),
+      timestamp: new Date().toISOString(),
+      createdAt: serverTimestamp()
+    };
+    const docRef = await addDoc(collection(db, AUDIT_LOGS_COL), payload);
+    return docRef.id;
+  } catch (err) {
+    console.warn('writeAuditLog warning (non-fatal):', err);
+    return null;
+  }
+}
 
 /**
  * Initializes the approved company structure (Departments, Designations, Users/Employees & Settings)
@@ -94,6 +119,20 @@ export async function initializeCompanyStructure() {
   } catch (err) {
     console.error('Error initializing company structure:', err);
   }
+}
+
+/**
+ * 0. Subscribe to Organization Settings (e.g. org.rootEmployeeId)
+ */
+export function subscribeToOrgSettings(callback) {
+  const docRef = doc(db, ORG_SETTINGS_COL, 'general');
+  return onSnapshot(docRef, (docSnap) => {
+    if (docSnap.exists()) {
+      callback({ id: docSnap.id, ...docSnap.data() });
+    } else {
+      callback({});
+    }
+  }, (err) => console.error('Org settings sync error:', err));
 }
 
 /**

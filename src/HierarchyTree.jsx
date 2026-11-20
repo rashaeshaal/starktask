@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import TreeNode from './TreeNode';
 import { buildHierarchy, formatName, LEVEL_STYLES } from './orgHelpers';
+import { subscribeToOrgSettings } from './firestoreService';
 
 export default function HierarchyTree({
   employees = [],
@@ -15,12 +16,24 @@ export default function HierarchyTree({
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedNodes, setCollapsedNodes] = useState(new Set());
+  const [orgConfig, setOrgConfig] = useState({});
   const treeContainerRef = useRef(null);
 
-  // Build hierarchy tree with robust dual-ID matching and fallback
+  // Subscribe to organization settings (org.rootEmployeeId)
+  useEffect(() => {
+    const unsub = subscribeToOrgSettings((settings) => {
+      setOrgConfig(settings || {});
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
+
+  // Build hierarchy tree with configurable rootEmployeeId from orgConfig
   const { rootNodes, orphanNodes } = useMemo(() => {
-    return buildHierarchy(employees);
-  }, [employees]);
+    const configuredRootId = orgConfig.rootEmployeeId || orgConfig['org.rootEmployeeId'] || null;
+    return buildHierarchy(employees, configuredRootId);
+  }, [employees, orgConfig]);
 
   // Expand / collapse all nodes
   const expandAll = () => setCollapsedNodes(new Set());

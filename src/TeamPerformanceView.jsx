@@ -14,6 +14,8 @@ import {
   SCOPES 
 } from './permissions';
 import { formatName, formatDepartment } from './orgHelpers';
+import { useDepartments } from './useDepartments';
+import EmployeeProfileDrawer from './EmployeeProfileDrawer';
 
 /**
  * TeamPerformanceView (STARK STEEL SalesDoor Enterprise)
@@ -50,31 +52,22 @@ export default function TeamPerformanceView({
     return new Set(inScopeEmployees.map(e => String(e.id || e.uid || e.employeeId)));
   }, [inScopeEmployees]);
 
-  // Dynamic Departments list from Firestore or fallback
+  const { departments: activeDepts } = useDepartments();
+
+  // Dynamic Departments list from useDepartments() (active only, without Purchase / Maintenance)
   const dynamicDepartments = useMemo(() => {
-    if (departments && departments.length > 0) {
-      return departments.map(d => ({
+    const sourceDepts = (activeDepts && activeDepts.length > 0) ? activeDepts : departments;
+    if (sourceDepts && sourceDepts.length > 0) {
+      return sourceDepts.map(d => ({
         id: String(d.id || d.slug || d.code || '').toLowerCase(),
-        name: formatDepartment(d.name || d.label || d.id)
+        name: d.name || formatDepartment(d.name || d.label || d.id)
       }));
     }
-    // Fallback if empty
-    return [
-      { id: 'sales', name: 'Sales' },
-      { id: 'operations', name: 'Operations' },
-      { id: 'hr_admin', name: 'HR & Admin' },
-      { id: 'finance', name: 'Finance & Accounts' },
-      { id: 'marketing', name: 'Marketing & Branding' },
-      { id: 'purchase', name: 'Purchase' },
-      { id: 'maintenance', name: 'Maintenance' },
-      { id: 'warehouse', name: 'Warehouse & Logistics' }
-    ];
-  }, [departments]);
+    return [];
+  }, [activeDepts, departments]);
 
-  // Period Control
-  const [period, setPeriod] = useState('today'); // 'today' | 'yesterday' | 'week' | 'month' | 'custom'
-  const [customStart, setCustomStart] = useState(getDateOffset(-7));
-  const [customEnd, setCustomEnd] = useState(todayStr);
+  // Period Date Control (Single Calendar Date Picker)
+  const [selectedDate, setSelectedDate] = useState(todayStr);
 
   // Quick Tab Filter
   const [quickTab, setQuickTab] = useState('all'); // 'all' | 'top' | 'attention'
@@ -111,14 +104,11 @@ export default function TeamPerformanceView({
     };
   }, [isCompanyScope, isDeptScope, currentUser]);
 
-  // Calculate Date Bounds
+  // Calculate Date Bounds from selectedDate
   const { startDate, endDate } = useMemo(() => {
-    if (period === 'today') return { startDate: todayStr, endDate: todayStr };
-    if (period === 'yesterday') return { startDate: yesterdayStr, endDate: yesterdayStr };
-    if (period === 'week') return { startDate: getDateOffset(-7), endDate: todayStr };
-    if (period === 'month') return { startDate: getDateOffset(-30), endDate: todayStr };
-    return { startDate: customStart || todayStr, endDate: customEnd || todayStr };
-  }, [period, todayStr, yesterdayStr, customStart, customEnd]);
+    const curDate = selectedDate || todayStr;
+    return { startDate: curDate, endDate: curDate };
+  }, [selectedDate, todayStr]);
 
   // Filter Tasks by Selected Period AND In-Scope Assignees
   const periodTasks = useMemo(() => {
@@ -369,27 +359,15 @@ export default function TeamPerformanceView({
 
         {/* Action Toolbar */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Period selector */}
-          <div className="flex items-center bg-white p-1 rounded-2xl border border-slate-200 shadow-xs text-xs">
-            {[
-              { id: 'today', label: 'Today' },
-              { id: 'yesterday', label: 'Yesterday' },
-              { id: 'week', label: 'This week' },
-              { id: 'month', label: 'This month' },
-              { id: 'custom', label: 'Custom' }
-            ].map(p => (
-              <button
-                key={p.id}
-                onClick={() => setPeriod(p.id)}
-                className={`px-3 py-1.5 rounded-xl font-medium transition ${
-                  period === p.id 
-                    ? 'bg-[#05331F] text-white shadow-xs' 
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
+          {/* Calendar Date Picker */}
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-2xl border border-slate-200 shadow-xs text-xs">
+            <Calendar className="w-4 h-4 text-emerald-700" />
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="bg-transparent text-slate-800 font-semibold text-xs focus:outline-none cursor-pointer"
+            />
           </div>
 
           {/* Export Button */}
@@ -402,27 +380,6 @@ export default function TeamPerformanceView({
           </button>
         </div>
       </div>
-
-      {/* Custom Date Range Picker */}
-      {period === 'custom' && (
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center gap-3 text-xs">
-          <Calendar className="w-4 h-4 text-emerald-700" />
-          <span className="font-semibold text-slate-700">Custom Date Range:</span>
-          <input
-            type="date"
-            value={customStart}
-            onChange={(e) => setCustomStart(e.target.value)}
-            className="border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50"
-          />
-          <span className="text-slate-400">to</span>
-          <input
-            type="date"
-            value={customEnd}
-            onChange={(e) => setCustomEnd(e.target.value)}
-            className="border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50"
-          />
-        </div>
-      )}
 
       {/* Summary Strip (Calculated dynamically over in-scope employees) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -785,182 +742,18 @@ export default function TeamPerformanceView({
         )}
       </div>
 
-      {/* Employee Details Side Drawer (Opens only for in-scope employees, full-screen on mobile) */}
-      {selectedEmployee && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex justify-end">
-          <div className="w-full sm:max-w-lg h-full bg-white shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200">
-            
-            {/* Drawer Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-800 font-bold flex items-center justify-center border border-emerald-200">
-                  {(selectedEmployee.displayName || 'EM').slice(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
-                    <span>{selectedEmployee.displayName}</span>
-                    {selectedEmployee.isSelf && (
-                      <span className="text-[10px] bg-[#05331F] text-white px-2 py-0.5 rounded font-bold">
-                        You
-                      </span>
-                    )}
-                  </h3>
-                  <p className="text-xs text-slate-500">{selectedEmployee.designation} {' \u00B7 '} {selectedEmployee.displayDept}</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setSelectedEmployee(null)} 
-                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 cursor-pointer"
-                aria-label="Close details"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Drawer Scrollable Body */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 text-xs">
-              
-              {/* Top Metrics Strip */}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] text-slate-400">Total Tasks</span>
-                  <p className="text-lg font-bold text-slate-900 mt-0.5">{selectedEmployee.totalTasks}</p>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] text-slate-400">Completed</span>
-                  <p className="text-lg font-bold text-[#10B981] mt-0.5">{selectedEmployee.completedTasks}</p>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <span className="text-[10px] text-slate-400">Overdue</span>
-                  <p className="text-lg font-bold text-rose-600 mt-0.5">{selectedEmployee.overdueTasks}</p>
-                </div>
-              </div>
-
-              {/* Real Dynamic 14-Day Calendar Heatmap */}
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">
-                    14-Day Performance Heatmap
-                  </p>
-                  <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-600 inline-block"></span> 100%</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span> Partial</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> Overdue</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-7 gap-1.5 pt-1">
-                  {(selectedEmployee.dailyHeatmap || []).map((day) => {
-                    const isToday = day.date === todayStr;
-                    
-                    let bgStyle = "bg-white border-slate-200 text-slate-700";
-                    let badgeText = "—";
-                    
-                    if (day.statusType === 'perfect') {
-                      bgStyle = isToday 
-                        ? "bg-[#05331F] text-white border-[#05331F]" 
-                        : "bg-emerald-600 text-white border-emerald-700";
-                      badgeText = `${day.done}/${day.total}`;
-                    } else if (day.statusType === 'overdue') {
-                      bgStyle = "bg-rose-50 text-rose-700 border-rose-300";
-                      badgeText = `${day.done}/${day.total}`;
-                    } else if (day.statusType === 'partial') {
-                      bgStyle = "bg-amber-50 text-amber-700 border-amber-300";
-                      badgeText = `${day.done}/${day.total}`;
-                    } else if (isToday) {
-                      bgStyle = "bg-slate-100 border-slate-300 text-slate-900 font-semibold";
-                    }
-
-                    return (
-                      <div 
-                        key={day.date} 
-                        className={`p-2 rounded-lg text-center border transition ${bgStyle}`}
-                        title={`${day.date}: ${day.total > 0 ? `${day.done}/${day.total} tasks completed` : 'No tasks'}`}
-                      >
-                        <span className="block text-[9px] opacity-75">{day.dayNum}</span>
-                        <span className="block font-bold text-[10px] truncate">{badgeText}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Tasks List */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">
-                    Tasks for Selected Period ({selectedEmployee.tasks?.length || 0})
-                  </p>
-                  {onOpenAssignModal && !selectedEmployee.isSelf && (
-                    <button
-                      onClick={() => {
-                        onOpenAssignModal({
-                          memberId: selectedEmployee.id,
-                          memberName: selectedEmployee.displayName,
-                          department: selectedEmployee.department
-                        });
-                        setSelectedEmployee(null);
-                      }}
-                      className="text-xs font-semibold text-emerald-800 hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <Send className="w-3 h-3" />
-                      <span>Assign Task</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  {(selectedEmployee.tasks || []).length === 0 ? (
-                    <div className="py-6 text-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                      No tasks assigned for this timeframe.
-                    </div>
-                  ) : (
-                    selectedEmployee.tasks.map(t => (
-                      <div 
-                        key={t.id} 
-                        onClick={() => {
-                          if (onOpenTaskDetails) onOpenTaskDetails(t);
-                          setSelectedEmployee(null);
-                        }}
-                        className="p-3 bg-white hover:bg-slate-50/80 border border-slate-200 rounded-xl cursor-pointer transition space-y-1"
-                      >
-                        <div className="flex items-center justify-between">
-                          <p className="font-semibold text-slate-900 text-xs truncate max-w-[240px]">{t.title}</p>
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-semibold ${
-                            t.status === 'Completed' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'
-                          }`}>
-                            {t.status}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 truncate">{t.description}</p>
-                        <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1">
-                          <span>Deadline: {t.deadlineDate || 'None'}</span>
-                          <span>Priority: {t.priority || 'Medium'}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-            </div>
-
-            {/* Drawer Footer */}
-            <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <span className="text-[11px] text-slate-500">
-                Last activity: {selectedEmployee.lastActivityTime}
-              </span>
-              <button
-                onClick={() => setSelectedEmployee(null)}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
+      {/* Employee Details Side Drawer (Opens full 10-section profile) */}
+      <EmployeeProfileDrawer
+        isOpen={Boolean(selectedEmployee)}
+        onClose={() => setSelectedEmployee(null)}
+        employee={selectedEmployee}
+        currentUser={currentUser}
+        reportingManager={employees.find(e => 
+          String(e.id || e.employeeId) === String(selectedEmployee?.reportsTo || selectedEmployee?.reportingManagerId)
+        )}
+        isMe={selectedEmployee?.isSelf}
+        isHR={currentUser?.role === 'HR Manager' || currentUser?.role === 'HR & Admin Manager'}
+      />
 
     </div>
   );

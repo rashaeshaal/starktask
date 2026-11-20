@@ -11,7 +11,8 @@ export default function TeamMemberRow({
   canAssign = false,
   canRemove = false,
   onAssign,
-  onRemove
+  onRemove,
+  onSelect
 }) {
   const memberUid = member.userId || member.uid || member.id;
   const fullName = formatName(member.fullName || member.name || 'Member');
@@ -21,7 +22,10 @@ export default function TeamMemberRow({
   const reportingLeadName = member.reportingLeadName ? formatName(member.reportingLeadName) : null;
 
   return (
-    <div className="p-2 bg-slate-50/80 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-xs transition-colors hover:bg-slate-100/60">
+    <div 
+      onClick={() => onSelect && onSelect(member)}
+      className="p-2 bg-slate-50/80 rounded-xl border border-slate-100 flex items-center justify-between gap-2 text-xs transition-colors hover:bg-slate-100/60 cursor-pointer"
+    >
       
       {/* Left: Avatar + Details */}
       <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -79,3 +83,4 @@ export default function TeamMemberRow({
     </div>
   );
 }
+

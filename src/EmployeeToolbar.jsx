@@ -56,7 +56,7 @@ export default function EmployeeToolbar({
             onChange={(e) => onDepartmentFilterChange(e.target.value)}
             className="h-10 pl-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none appearance-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 cursor-pointer transition-colors"
           >
-            <option value="all">All Departments</option>
+            <option value="all">All Departments ({departments.length})</option>
             {departments.map(d => (
               <option key={d.id} value={d.id}>{d.name || formatDepartment(d.id)}</option>
             ))}

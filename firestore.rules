@@ -10,16 +10,25 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Single source of truth for all-access performance roles (Director Operations & Executive Director)
-    function isAllAccessPerformanceRole() {
+    // Single source of truth for company head roles (Executive Director & Director Operations have identical top authority)
+    function isCompanyHead() {
       let role = getUserData().role;
       return role == 'Executive Director' || role == 'Director Operations';
     }
 
-    // Company Management Scope (Leadership & HR/Admin Managers)
+    function isAllAccessPerformanceRole() {
+      return isCompanyHead();
+    }
+
+    // Target employee is a company head
+    function isTargetCompanyHead(targetData) {
+      return targetData.role == 'Executive Director' || targetData.role == 'Director Operations';
+    }
+
+    // Company Management Scope (Company Heads & HR/Admin Managers)
     function isCompanyScope() {
       let role = getUserData().role;
-      return isAllAccessPerformanceRole() || 
+      return isCompanyHead() || 
              role == 'General Manager' ||
              role == 'HR Manager' ||
              role == 'Admin Manager' ||
@@ -28,12 +37,28 @@ service cloud.firestore {
 
     // Explicit helper for managing organization structure, employees, and teams
     function canManageOrgStructure() {
-      let role = getUserData().role;
-      return isAllAccessPerformanceRole() || 
-             role == 'General Manager' ||
-             role == 'HR Manager' ||
-             role == 'Admin Manager' ||
-             role == 'HR & Admin Manager';
+      return isCompanyScope();
+    }
+
+    // Can actor manage this specific employee target (enforcing safety rules 1a to 1e)
+    function canManageTargetEmployee(targetData, isSelf) {
+      // 1a. Cannot change own role, level or designation
+      // 1b. Cannot deactivate own account
+      let isRoleChanged = request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'level', 'designation']);
+      let isDeactivatingSelf = isSelf && request.resource.data.status == 'inactive' && resource.data.status != 'inactive';
+      
+      return (
+        isCompanyHead() && 
+        !(isSelf && isRoleChanged) &&
+        !isDeactivatingSelf
+      ) ||
+      (
+        canManageOrgStructure() && 
+        !isCompanyHead() && 
+        !isTargetCompanyHead(targetData) &&
+        !(isSelf && isRoleChanged) &&
+        !isDeactivatingSelf
+      );
     }
 
     // Department Head check
@@ -77,19 +102,26 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && canManageOrgStructure();
       allow update: if isAuthenticated() && (
-        canManageOrgStructure() ||
+        canManageTargetEmployee(resource.data, request.auth.uid == userId) ||
         (
           request.auth.uid == userId && 
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone', 'photoUrl', 'avatar', 'updatedAt'])
         )
       );
-      allow delete: if isAuthenticated() && canManageOrgStructure();
+      allow delete: if isAuthenticated() && canManageTargetEmployee(resource.data, request.auth.uid == userId);
     }
 
     // --- DEPARTMENTS & DESIGNATIONS ---
     match /departments/{deptId} {
       allow read: if true;
-      allow write: if isAuthenticated() && canManageOrgStructure();
+      allow create: if isAuthenticated() && canManageOrgStructure();
+      allow update: if isAuthenticated() && canManageOrgStructure() && (
+        // 1c. Cannot archive if department still has active employees
+        !(request.resource.data.status == 'archived' && 
+          resource.data.status != 'archived' && 
+          (resource.data.activeEmployeesCount > 0 || resource.data.assignedCount > 0 || resource.data.memberCount > 0))
+      );
+      allow delete: if isAuthenticated() && isCompanyHead();
     }
 
     match /designations/{desId} {
@@ -99,15 +131,25 @@ service cloud.firestore {
 
     match /organizationSettings/{settingId} {
       allow read: if true;
-      allow write: if isAuthenticated() && canManageOrgStructure();
+      allow write: if isAuthenticated() && isCompanyHead();
     }
 
     // --- TEAMS COLLECTION ---
     match /teams/{teamId} {
       allow read: if isAuthenticated();
-      allow create, update, delete: if isAuthenticated() && (
+      allow create: if isAuthenticated() && (
         canManageOrgStructure() || 
-        (getUserData().role == 'Operations Head' && resource.data.departmentId == 'operations')
+        (getUserData().role == 'Operations Head' && request.resource.data.departmentId in ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'])
+      );
+      allow update: if isAuthenticated() && (
+        canManageOrgStructure() || 
+        (getUserData().role == 'Operations Head' && resource.data.departmentId in ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'])
+      );
+      allow delete: if isAuthenticated() && (
+        // 1d. Cannot delete team that still has active tasks
+        (isCompanyHead() && (resource.data.activeTasksCount == null || resource.data.activeTasksCount == 0)) ||
+        (canManageOrgStructure() && !isCompanyHead() && (resource.data.activeTasksCount == null || resource.data.activeTasksCount == 0)) ||
+        (getUserData().role == 'Operations Head' && resource.data.departmentId in ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'] && (resource.data.activeTasksCount == null || resource.data.activeTasksCount == 0))
       );
     }
 
@@ -170,6 +212,12 @@ service cloud.firestore {
     }
 
     // --- AUDIT LOGS, NOTIFICATIONS & RECURRING TASKS ---
+    match /auditLogs/{logId} {
+      allow read: if isAuthenticated() && canManageOrgStructure();
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Immutable audit records
+    }
+
     match /taskAuditLogs/{logId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
@@ -182,6 +230,17 @@ service cloud.firestore {
 
     match /recurringTasks/{recId} {
       allow read, write: if isAuthenticated();
+    }
+
+    // --- CONFIDENTIAL MANAGER NOTES (HR & Leadership Only) ---
+    match /employeeNotes/{noteId} {
+      allow read, write: if isAuthenticated() && (
+        isCompanyHead() || 
+        isCompanyScope() || 
+        isOperationsHead() || 
+        isCSO() || 
+        isAccountsManager()
+      );
     }
 
     // --- ANNOUNCEMENTS ---

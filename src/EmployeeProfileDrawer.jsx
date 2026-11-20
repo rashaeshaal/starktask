@@ -1,220 +1,275 @@
-import React from 'react';
+// src/EmployeeProfileDrawer.jsx
+// Complete Employee Profile drawer / page with 10 structured sections, RBAC, skeleton loaders, and responsive layout
+
+import React, { useState, useEffect } from 'react';
 import { 
-  X, Mail, Phone, Calendar, Building2, Briefcase, 
-  Shield, UserCheck, KeyRound, Edit, Trash2, ChevronRight, User
+  X, Edit, KeyRound, UserCheck, Trash2, Shield, 
+  ExternalLink, Loader2 
 } from 'lucide-react';
-import { getRoleLevel } from './orgTree';
+
+import ProfileHeader from './components/profile/ProfileHeader';
+import StatCards from './components/profile/StatCards';
+import WorkloadMeter from './components/profile/WorkloadMeter';
+import Heatmap from './components/profile/Heatmap';
+import PriorityMix from './components/profile/PriorityMix';
+import ReasonsList from './components/profile/ReasonsList';
+import ReworkCard from './components/profile/ReworkCard';
+import Timeline from './components/profile/Timeline';
+import ManagerNotes from './components/profile/ManagerNotes';
+import DataQualityBanner from './components/profile/DataQualityBanner';
+
+import { useEmployeeStats } from './useEmployeeStats';
+import { can, PERMISSIONS, isCompanyHead } from './permissions';
+import { formatName } from './orgHelpers';
 
 export default function EmployeeProfileDrawer({
   isOpen,
   onClose,
   employee,
   reportingManager,
+  currentUser,
   isMe = false,
   isHR = false,
   onEdit,
   onResetPassword,
   onToggleStatus
 }) {
+  const [rangeDays, setRangeDays] = useState(30);
+
+  // Close on Escape key press
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose && onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Prevent scrolling on root when drawer is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
+  const employeeId = employee ? String(employee.id || employee.uid || employee.employeeId || '') : '';
+  const { isLoading, stats } = useEmployeeStats(employeeId, rangeDays);
+
   if (!isOpen || !employee) return null;
 
-  const isActive = (employee.status || employee.employmentStatus) !== 'inactive';
-  const roleName = employee.designation || employee.role || 'Staff Member';
-  const roleLvl = getRoleLevel(roleName);
+  // RBAC permissions checks
+  const myRole = currentUser?.role || '';
+  const isTopLeader = isCompanyHead(currentUser) || isCompanyHead(myRole);
+  const isHRAdmin = isHR || myRole === 'HR Manager' || myRole === 'Admin Manager' || myRole === 'HR & Admin Manager' || myRole === 'General Manager';
+  const isDeptHead = myRole.includes('Head') || myRole.includes('Manager') || myRole === 'CSO';
+  
+  // Leadership roles can see manager notes & data quality banner
+  const canSeeManagerNotes = (isTopLeader || isHRAdmin || isDeptHead) && !isMe;
+  const canEditEmployee = can(currentUser, PERMISSIONS.EMPLOYEE_EDIT, employee);
+  const canResetPassword = can(currentUser, PERMISSIONS.EMPLOYEE_RESET_PASSWORD, employee);
+  const canDeactivate = can(currentUser, PERMISSIONS.EMPLOYEE_DEACTIVATE, employee);
 
-  // Format initials
-  const getInitials = (name) => {
-    if (!name) return 'ST';
-    const parts = name.trim().split(' ');
-    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  };
+  const isActive = (employee.status || employee.employmentStatus) !== 'inactive';
 
   return (
     <div 
-      className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex justify-end animate-in fade-in duration-200"
-      onClick={onClose}
+      className="fixed inset-0 z-50 overflow-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="profile-drawer-title"
     >
+      {/* Backdrop */}
       <div 
-        className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-200 border-l border-slate-200"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Top Header */}
-        <div>
-          <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Employee Profile
-            </span>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close drawer"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-            >
-              <X className="w-5 h-5" strokeWidth={1.75} />
-            </button>
-          </div>
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity duration-200"
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
-          {/* Profile Identity Hero */}
-          <div className="p-6 bg-slate-50/70 border-b border-slate-100 flex items-start gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-[#05331F] text-emerald-300 font-bold text-xl flex items-center justify-center shrink-0 shadow-sm border-2 border-white">
-              {getInitials(employee.fullName || employee.name)}
+      {/* Drawer slide-over */}
+      <div className="absolute inset-y-0 right-0 max-w-full flex pl-6 sm:pl-10">
+        <div className="w-screen max-w-full sm:max-w-2xl md:max-w-3xl lg:max-w-4xl bg-slate-50 shadow-2xl border-l border-slate-200 flex flex-col animate-in slide-in-from-right duration-200">
+          
+          {/* Top Control Bar */}
+          <div className="px-6 py-3.5 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider" id="profile-drawer-title">
+                Employee Profile Overview
+              </span>
+              <span className="font-mono text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md font-semibold">
+                {employee.employeeId ? (String(employee.employeeId).startsWith('EMP-') ? employee.employeeId : `EMP-${employee.employeeId}`) : 'EMP-ID'}
+              </span>
             </div>
 
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-lg font-bold text-slate-900 capitalize">
-                  {employee.fullName || employee.name}
-                </h2>
-                {isMe && (
-                  <span className="text-[10px] bg-emerald-600 text-white font-semibold px-2 py-0.5 rounded-full">
-                    You
-                  </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close profile drawer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Drawer Body - Scrollable Content */}
+          <div className="flex-1 overflow-y-auto">
+            {/* Section 1: Header */}
+            <ProfileHeader 
+              employee={employee}
+              reportingManager={reportingManager}
+              isMe={isMe}
+            />
+
+            <div className="p-4 sm:p-6 space-y-6">
+              
+              {/* Section 10: Data-quality banner (shown when incomplete metadata detected) */}
+              <DataQualityBanner 
+                employee={employee}
+                onEdit={onEdit}
+                canEdit={canEditEmployee}
+              />
+
+              {/* Skeleton Loaders during stats query */}
+              {isLoading ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[1, 2, 3, 4].map(k => (
+                      <div key={k} className="h-24 bg-white rounded-2xl border border-slate-200 p-4 animate-pulse" />
+                    ))}
+                  </div>
+                  <div className="h-28 bg-white rounded-2xl border border-slate-200 p-4 animate-pulse" />
+                </div>
+              ) : (
+                <>
+                  {/* Section 2: Stat Cards with 7/14/30 day toggle */}
+                  <StatCards 
+                    stats={stats}
+                    rangeDays={rangeDays}
+                    onRangeChange={setRangeDays}
+                  />
+
+                  {/* Section 3: Workload Meter */}
+                  <WorkloadMeter 
+                    openCount={stats?.openCount || 0}
+                    defaultThreshold={8}
+                  />
+
+                  {/* Section 4: 14-day Heatmap */}
+                  <Heatmap 
+                    heatmapDays={stats?.heatmapDays || []}
+                    trendDirection={stats?.trendDirection || 'stable'}
+                    last14Completed={stats?.last14Completed || 0}
+                    prev14Completed={stats?.prev14Completed || 0}
+                  />
+
+                  {/* Section 5: Priority Mix Bar */}
+                  <PriorityMix 
+                    priorityMix={stats?.priorityMix}
+                  />
+
+                  {/* Section 6 & 7: Incomplete reasons & Rework in 2-column grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <ReasonsList 
+                      reasons={stats?.incompleteReasons || []}
+                    />
+                    <ReworkCard 
+                      reworkCount={stats?.reworkCount || 0}
+                      reworkRate={stats?.reworkRate || 0}
+                      assigned={stats?.assigned || 0}
+                    />
+                  </div>
+
+                  {/* Section 8: Timeline from auditLogs */}
+                  <Timeline 
+                    employeeId={employeeId}
+                  />
+
+                  {/* Section 9: Manager notes (Leadership only, hidden for employee) */}
+                  {canSeeManagerNotes && (
+                    <ManagerNotes 
+                      employeeId={employeeId}
+                      currentUser={currentUser}
+                      canManageNotes={canSeeManagerNotes}
+                    />
+                  )}
+                </>
+              )}
+
+            </div>
+          </div>
+
+          {/* Action Footer (Actions hidden if not permitted) */}
+          {(canEditEmployee || canResetPassword || canDeactivate) && (
+            <div className="p-4 sm:p-5 bg-white border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
+              <span className="text-xs text-slate-500 hidden sm:inline">
+                Authorized Governance Actions
+              </span>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                {canEditEmployee && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose && onClose();
+                      onEdit && onEdit(employee);
+                    }}
+                    className="flex-1 sm:flex-none h-10 px-4 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
+                  >
+                    <Edit className="w-4 h-4 text-slate-500" />
+                    <span>Edit Profile</span>
+                  </button>
+                )}
+
+                {canResetPassword && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose && onClose();
+                      onResetPassword && onResetPassword(employee);
+                    }}
+                    className="h-10 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
+                    title="Generate Password Reset"
+                    aria-label="Generate Password Reset"
+                  >
+                    <KeyRound className="w-4 h-4 text-slate-500" />
+                    <span className="hidden md:inline">Reset Password</span>
+                  </button>
+                )}
+
+                {canDeactivate && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose && onClose();
+                      onToggleStatus && onToggleStatus(employee);
+                    }}
+                    className={`h-10 px-3.5 rounded-xl border text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-2xs ${
+                      isActive 
+                        ? 'border-red-200 text-red-600 hover:bg-red-50' 
+                        : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                    }`}
+                    title={isActive ? 'Deactivate Employee' : 'Activate Employee'}
+                    aria-label={isActive ? 'Deactivate Employee' : 'Activate Employee'}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span className="hidden md:inline">{isActive ? 'Deactivate' : 'Activate'}</span>
+                  </button>
                 )}
               </div>
-
-              <p className="text-sm text-slate-600 font-medium mt-0.5">
-                {roleName}
-              </p>
-
-              <div className="flex items-center gap-2 mt-2 flex-wrap">
-                <span className="font-mono text-xs text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200 font-semibold">
-                  {employee.employeeId ? (String(employee.employeeId).startsWith('EMP-') ? employee.employeeId : `EMP-${employee.employeeId}`) : 'EMP-ID'}
-                </span>
-
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                  isActive ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                  {isActive ? 'Active' : 'Inactive'}
-                </span>
-
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-200/70 text-slate-700">
-                  Level {roleLvl}
-                </span>
-              </div>
             </div>
-          </div>
+          )}
 
-          {/* Metadata Breakdown */}
-          <div className="p-6 space-y-5">
-            <div className="space-y-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Organization Details
-              </h3>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs py-1 border-b border-slate-100">
-                  <span className="text-slate-500 flex items-center gap-2">
-                    <Building2 className="w-4 h-4 text-emerald-600" strokeWidth={1.75} />
-                    <span>Department</span>
-                  </span>
-                  <span className="font-semibold text-slate-900 uppercase font-mono text-[11px] bg-slate-100 px-2 py-0.5 rounded">
-                    {employee.department || 'Operations'}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between text-xs py-1 border-b border-slate-100">
-                  <span className="text-slate-500 flex items-center gap-2">
-                    <User className="w-4 h-4 text-emerald-600" strokeWidth={1.75} />
-                    <span>Reports To</span>
-                  </span>
-                  <span className="font-semibold text-slate-900 truncate max-w-[200px]" title={reportingManager?.fullName || employee.reportingManagerName || 'Top Leadership'}>
-                    {reportingManager?.fullName || employee.reportingManagerName || 'Executive Director'}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between text-xs py-1 border-b border-slate-100">
-                  <span className="text-slate-500 flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-emerald-600" strokeWidth={1.75} />
-                    <span>Joining Date</span>
-                  </span>
-                  <span className="font-semibold text-slate-800">
-                    {employee.joiningDate || 'Standard Active'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Contact Details */}
-            <div className="space-y-4 pt-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                Contact & Communication
-              </h3>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs py-1 border-b border-slate-100">
-                  <span className="text-slate-500 flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-emerald-600" strokeWidth={1.75} />
-                    <span>Official Email</span>
-                  </span>
-                  <a 
-                    href={`mailto:${employee.email}`}
-                    className="font-semibold text-emerald-700 hover:underline truncate max-w-[210px] font-mono text-[11px]"
-                    title={employee.email}
-                  >
-                    {employee.email}
-                  </a>
-                </div>
-
-                <div className="flex items-center justify-between text-xs py-1 border-b border-slate-100">
-                  <span className="text-slate-500 flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-emerald-600" strokeWidth={1.75} />
-                    <span>Contact Phone</span>
-                  </span>
-                  <span className="font-semibold text-slate-800 font-mono text-[11px]">
-                    {employee.phone || '+91 Not Recorded'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
-
-        {/* Footer Actions (HR & Leadership only) */}
-        {isHR && (
-          <div className="p-6 bg-slate-50 border-t border-slate-200 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onEdit && onEdit(employee);
-              }}
-              className="flex-1 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-100 transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
-            >
-              <Edit className="w-4 h-4 text-slate-500" strokeWidth={1.75} />
-              <span>Edit Profile</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onResetPassword && onResetPassword(employee);
-              }}
-              className="h-10 px-3 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-100 transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
-              title="Reset Password"
-            >
-              <KeyRound className="w-4 h-4 text-slate-500" strokeWidth={1.75} />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onToggleStatus && onToggleStatus(employee);
-              }}
-              className={`h-10 px-3 rounded-xl border text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-2xs ${
-                isActive ? 'border-red-200 text-red-600 hover:bg-red-50' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
-              }`}
-              title={isActive ? 'Deactivate Employee' : 'Activate Employee'}
-            >
-              <Trash2 className="w-4 h-4" strokeWidth={1.75} />
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
 }
-
