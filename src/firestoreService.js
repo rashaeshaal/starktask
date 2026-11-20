@@ -253,7 +253,7 @@ export function subscribeToTasks(currentUser, callback, allEmployees = []) {
     return () => unsubs.forEach(unsub => unsub());
   }
 
-  // 4. Self Scope: Frontline personnel (strictly assignedToId == uid)
+  // 4. Self Scope: Frontline personnel (assignedToId == uid or assignedTo == uid)
   const q = query(
     collection(db, TASKS_COL),
     where('assignedToId', '==', uid)
@@ -264,7 +264,13 @@ export function subscribeToTasks(currentUser, callback, allEmployees = []) {
     snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
     callback(list);
   }, (err) => {
-    console.error('Self tasks listener error:', err);
+    console.error('Self tasks listener error, falling back to assignedTo query:', err);
+    const qFallback = query(collection(db, TASKS_COL), where('assignedTo', '==', uid));
+    return onSnapshot(qFallback, (altSnap) => {
+      const altList = [];
+      altSnap.forEach(d => altList.push({ id: d.id, ...d.data() }));
+      callback(altList);
+    });
   });
 }
 

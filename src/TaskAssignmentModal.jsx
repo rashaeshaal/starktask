@@ -556,6 +556,9 @@ export default function TaskAssignmentModal({
         const empName = targetEmp?.fullName || targetEmp?.name || 'Staff Member';
         const empDept = targetEmp?.department || selectedDept || 'operations';
 
+        const empEmpId = targetEmp?.employeeId ? String(targetEmp.employeeId) : null;
+        const allTargetIds = [empId, empEmpId, targetEmp?.id, targetEmp?.uid].filter(Boolean);
+
         const newTask = {
           title: title.trim(),
           description: description.trim(),
@@ -570,6 +573,7 @@ export default function TaskAssignmentModal({
           
           assignedToId: empId,
           assignedTo: empId,
+          assigneeIds: Array.from(new Set(allTargetIds)),
           assignedToName: empName,
           assignedToRole: targetEmp?.role || targetEmp?.designation || 'Staff',
           department: empDept,

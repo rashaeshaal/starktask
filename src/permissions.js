@@ -800,6 +800,23 @@ export function getVisibleUserIds(user, allEmployees = []) {
       return Array.from(ids);
     }
 
+    // Sales ASM / SSM: Can assign and supervise downline Sales Coordinators
+    if (userRole === 'ASM' || userRole === 'SSM' || userRole === 'Asst Sales Manager' || userRole === 'State Sales Manager') {
+      const allowedSalesDownline = userRole.includes('SSM') || userRole.includes('State')
+        ? ['ASM', 'Asst Sales Manager', 'Sales Coordinator']
+        : ['Sales Coordinator'];
+      const ids = new Set([myId]);
+      allEmployees.forEach(e => {
+        const eId = String(e.id || e.uid || e.employeeId);
+        const r = normalizeRoleName(e.role || e.designation || '');
+        const d = (e.department || e.departmentId || '').toLowerCase();
+        if (d === 'sales' && allowedSalesDownline.includes(r)) {
+          ids.add(eId);
+        }
+      });
+      return Array.from(ids);
+    }
+
     const downlineIds = new Set([myId]);
     if (Array.isArray(user.downline)) {
       user.downline.forEach(id => downlineIds.add(String(id)));
