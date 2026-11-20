@@ -1,23 +1,12 @@
+// src/EmployeeCard.jsx
+// Equal-height employee card with Title Case names, humanized departments, and actions
+
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   MoreHorizontal, Edit, KeyRound, Trash2, Mail, Check, Copy
 } from 'lucide-react';
 import { useToast } from './ToastContext';
-
-// Color dots per department
-const DEPT_DOT_COLORS = {
-  management: 'bg-indigo-500',
-  sales: 'bg-emerald-500',
-  operations: 'bg-blue-500',
-  warehouse: 'bg-amber-500',
-  transportation: 'bg-cyan-500',
-  service: 'bg-purple-500',
-  inventory: 'bg-teal-500',
-  finance: 'bg-emerald-600',
-  hr_admin: 'bg-rose-500',
-  marketing: 'bg-pink-500',
-  quality_control: 'bg-orange-500'
-};
+import { formatName, formatEmpId, formatDepartment, DEPT_DOT_COLORS } from './orgHelpers';
 
 export default function EmployeeCard({
   employee,
@@ -37,8 +26,14 @@ export default function EmployeeCard({
 
   const isActive = (employee.status || employee.employmentStatus) !== 'inactive';
   const roleName = employee.designation || employee.role || 'Staff Member';
+  const displayName = formatName(employee.fullName || employee.name);
+  const empIdFormatted = formatEmpId(employee.employeeId);
   const deptKey = (employee.department || employee.departmentId || 'operations').toLowerCase();
+  const deptDisplay = formatDepartment(employee.department || employee.departmentId);
   const dotColor = DEPT_DOT_COLORS[deptKey] || 'bg-slate-400';
+
+  // Check if role name is redundant (identical to display name)
+  const isRedundantRole = roleName.trim().toLowerCase() === displayName.trim().toLowerCase();
 
   // Format initials
   const getInitials = (name) => {
@@ -46,26 +41,6 @@ export default function EmployeeCard({
     const parts = name.trim().split(' ');
     if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
     return name.slice(0, 2).toUpperCase();
-  };
-
-  // Format employee ID: add EMP- prefix if bare number
-  const formatEmpId = (raw) => {
-    if (!raw) return 'EMP-000';
-    const s = String(raw).trim();
-    if (s.toUpperCase().startsWith('EMP-')) return s.toUpperCase();
-    return `EMP-${s}`;
-  };
-
-  // Convert all caps to Title Case for pleasant readability
-  const formatName = (str) => {
-    if (!str) return 'Employee';
-    // If string has mixed case already, keep as is
-    if (/[a-z]/.test(str) && /[A-Z]/.test(str)) return str;
-    return str
-      .toLowerCase()
-      .split(' ')
-      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ');
   };
 
   // Outside click & ESC listener
@@ -99,124 +74,111 @@ export default function EmployeeCard({
 
   const handleCopyEmail = (e) => {
     e.stopPropagation();
-    if (!employee.email) return;
-    navigator.clipboard.writeText(employee.email);
-    setCopied(true);
-    showToast('Email copied to clipboard');
-    setTimeout(() => setCopied(false), 1500);
+    if (employee.email) {
+      navigator.clipboard.writeText(employee.email);
+      setCopied(true);
+      showToast({ type: 'success', message: 'Email copied to clipboard' });
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (
     <div
       onClick={() => onSelect && onSelect(employee)}
-      className="group bg-white rounded-2xl border border-slate-200 p-4 shadow-sm hover:border-emerald-300 hover:shadow-md transition-all duration-150 flex flex-col justify-between cursor-pointer relative"
+      className="group relative bg-white rounded-2xl border border-slate-200 p-4 shadow-sm hover:border-emerald-300 hover:shadow-md transition-all duration-150 flex flex-col justify-between cursor-pointer h-full"
     >
-      {/* ROW 1: Avatar | Name + Designation | Status Pill + 3-dots */}
       <div className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
+        {/* Row 1: Avatar, Name & Designation, Status pill, 3-dots */}
+        <div className="flex items-start justify-between gap-2">
           
-          {/* Avatar + Name block */}
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="w-11 h-11 rounded-xl bg-[#05331F] text-emerald-300 font-bold flex items-center justify-center text-xs shrink-0 shadow-2xs">
-              {getInitials(employee.fullName || employee.name)}
+            {/* Avatar */}
+            <div className="relative flex-shrink-0">
+              {employee.photoUrl ? (
+                <img
+                  src={employee.photoUrl}
+                  alt={displayName}
+                  className="w-10 h-10 rounded-xl object-cover border border-slate-200"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-xl bg-[#05331F] text-emerald-200 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                  {getInitials(displayName)}
+                </div>
+              )}
+              {isMe && (
+                <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-600 border-2 border-white rounded-full" title="You" />
+              )}
             </div>
 
+            {/* Name & Designation */}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <h3 
-                  className="font-semibold text-sm text-slate-900 truncate"
-                  title={employee.fullName || employee.name}
-                >
-                  {formatName(employee.fullName || employee.name)}
+                <h3 className="font-semibold text-sm text-slate-900 truncate group-hover:text-emerald-900 transition-colors">
+                  {displayName}
                 </h3>
-                {isMe && (
-                  <span className="text-[10px] bg-emerald-600 text-white font-medium px-1.5 py-0.2 rounded-full shrink-0">
-                    You
-                  </span>
-                )}
               </div>
 
-              <p 
-                className="text-sm text-slate-600 truncate mt-0.5"
-                title={roleName}
-              >
-                {roleName}
-              </p>
+              {!isRedundantRole && (
+                <p className="text-xs text-slate-500 truncate mt-0.5">
+                  {roleName}
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Right: Fixed-size Status Pill + Menu Button */}
-          <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shrink-0 whitespace-nowrap ${
+          {/* Status pill & 3-dots menu */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
               isActive 
                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                : 'bg-red-50 text-red-700 border border-red-200'
+                : 'bg-rose-50 text-rose-700 border border-rose-200'
             }`}>
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-rose-500'}`} />
               <span>{isActive ? 'Active' : 'Inactive'}</span>
             </span>
 
             {isHR && (
-              <div className="relative">
+              <div className="relative" ref={menuRef} onClick={(e) => e.stopPropagation()}>
                 <button
                   ref={btnRef}
                   type="button"
                   onClick={toggleMenu}
-                  aria-label="Employee options"
-                  className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500/40 outline-none"
+                  aria-label="Actions menu"
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
                 >
-                  <MoreHorizontal className="w-[18px] h-[18px]" strokeWidth={1.75} />
+                  <MoreHorizontal className="w-4 h-4" />
                 </button>
 
-                {/* Popover Menu */}
                 {isMenuOpen && (
-                  <div
-                    ref={menuRef}
-                    className={`absolute right-0 z-30 w-44 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 text-left text-xs animate-in fade-in zoom-in-95 duration-100 ${
-                      openUpward ? 'bottom-9' : 'top-9'
-                    }`}
-                  >
+                  <div className={`absolute right-0 w-44 bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-30 animate-in fade-in zoom-in-95 duration-100 ${
+                    openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
+                  }`}>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsMenuOpen(false);
-                        onEdit && onEdit(employee);
-                      }}
-                      className="w-full px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2 font-medium transition-colors"
+                      onClick={() => { setIsMenuOpen(false); onEdit && onEdit(employee); }}
+                      className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                     >
-                      <Edit className="w-4 h-4 text-slate-400" strokeWidth={1.75} />
-                      <span>Edit Profile</span>
+                      <Edit className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Edit Details</span>
                     </button>
-
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsMenuOpen(false);
-                        onResetPassword && onResetPassword(employee);
-                      }}
-                      className="w-full px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2 font-medium transition-colors"
+                      onClick={() => { setIsMenuOpen(false); onResetPassword && onResetPassword(employee); }}
+                      className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                     >
-                      <KeyRound className="w-4 h-4 text-slate-400" strokeWidth={1.75} />
+                      <KeyRound className="w-3.5 h-3.5 text-slate-400" />
                       <span>Reset Password</span>
                     </button>
-
-                    <div className="my-1 border-t border-slate-100" />
-
+                    <div className="h-px bg-slate-100 my-1" />
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsMenuOpen(false);
-                        onToggleStatus && onToggleStatus(employee);
-                      }}
-                      className={`w-full px-3 py-2 flex items-center gap-2 font-medium transition-colors ${
-                        isActive ? 'text-red-600 hover:bg-red-50' : 'text-emerald-700 hover:bg-emerald-50'
+                      onClick={() => { setIsMenuOpen(false); onToggleStatus && onToggleStatus(employee); }}
+                      className={`w-full px-3 py-2 text-left text-xs flex items-center gap-2 ${
+                        isActive ? 'text-rose-600 hover:bg-rose-50' : 'text-emerald-700 hover:bg-emerald-50'
                       }`}
                     >
-                      <Trash2 className="w-4 h-4" strokeWidth={1.75} />
-                      <span>{isActive ? 'Deactivate' : 'Activate'}</span>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isActive ? 'Deactivate' : 'Activate'} Employee</span>
                     </button>
                   </div>
                 )}
@@ -225,39 +187,39 @@ export default function EmployeeCard({
           </div>
         </div>
 
-        {/* ROW 2: Employee ID */}
-        <div className="pt-0.5">
-          <span className="font-mono text-xs text-slate-500 font-medium">
-            {formatEmpId(employee.employeeId)}
+        {/* Row 2: EMP-ID */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-mono text-xs font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+            {empIdFormatted}
           </span>
         </div>
       </div>
 
-      {/* FOOTER: Department Chip (left) + Email Click-to-copy (right) */}
+      {/* Footer: Department chip & Email */}
       <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
-        
-        {/* Department chip with color-coded dot */}
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 text-slate-700 font-mono text-[10px] font-semibold uppercase tracking-wider shrink-0 max-w-[140px] truncate">
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
-          <span className="truncate">{employee.department || 'Operations'}</span>
+        {/* Department chip with colored dot */}
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-50 text-slate-600 text-[11px] font-medium border border-slate-100 truncate">
+          <span className={`w-2 h-2 rounded-full ${dotColor} flex-shrink-0`} />
+          <span className="truncate">{deptDisplay}</span>
         </div>
 
-        {/* Official Email */}
-        <button
-          type="button"
-          onClick={handleCopyEmail}
-          title={copied ? "Copied!" : `Click to copy: ${employee.email}`}
-          className="flex items-center gap-1.5 text-slate-500 hover:text-emerald-700 text-[11px] font-mono truncate max-w-[160px] sm:max-w-[180px] transition-colors group/mail"
-        >
-          {copied ? (
-            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" strokeWidth={2} />
-          ) : (
-            <Mail className="w-3.5 h-3.5 text-slate-400 group-hover/mail:text-emerald-600 shrink-0" strokeWidth={1.75} />
-          )}
-          <span className="truncate">{employee.email}</span>
-        </button>
-
+        {/* Email with copy button */}
+        {employee.email && (
+          <div 
+            onClick={handleCopyEmail}
+            title={`${employee.email} (Click to copy)`}
+            className="group/mail flex items-center gap-1 text-slate-400 hover:text-emerald-700 transition-colors cursor-pointer max-w-[50%]"
+          >
+            {copied ? (
+              <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+            ) : (
+              <Mail className="w-3.5 h-3.5 flex-shrink-0" />
+            )}
+            <span className="font-mono text-[11px] truncate">{employee.email}</span>
+          </div>
+        )}
       </div>
+
     </div>
   );
 }

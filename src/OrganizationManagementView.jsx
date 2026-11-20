@@ -371,7 +371,7 @@ export default function OrganizationManagementView({
               className="h-10 px-5 rounded-xl bg-[#05331F] hover:bg-[#0a4a2f] text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-2xs focus-visible:ring-2 focus-visible:ring-emerald-500/40 w-full sm:w-auto"
             >
               <Plus className="w-[18px] h-[18px] text-emerald-300" strokeWidth={2} />
-              <span>+ Add Employee</span>
+              <span>Add Employee</span>
             </button>
           </div>
         )}
@@ -578,6 +578,7 @@ export default function OrganizationManagementView({
                   department={dept}
                   assignedCount={assignedMembers.length}
                   totalEmployeesCount={employees.length}
+                  employees={employees}
                   canManageOrg={canManageOrg}
                   onSelect={handleFilterByDepartment}
                   onArchive={handleArchiveDepartment}

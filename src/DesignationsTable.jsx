@@ -1,6 +1,10 @@
+// src/DesignationsTable.jsx
+// Designations table with Level, Designation, Department, Employees, and Actions
+
 import React, { useState, useMemo } from 'react';
-import { Edit, ChevronDown, ChevronUp, ArrowUpDown, Search, Filter } from 'lucide-react';
+import { Edit, ChevronDown, ChevronUp, ArrowUpDown, ChevronRight } from 'lucide-react';
 import { getRoleLevel } from './orgTree';
+import { formatDepartment, pluralize, LEVEL_STYLES } from './orgHelpers';
 
 export default function DesignationsTable({
   designations = [],
@@ -81,191 +85,155 @@ export default function DesignationsTable({
       {/* Table Filters Toolbar */}
       <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3">
         
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Level Filter */}
           <div className="relative">
             <select
               value={levelFilter}
               onChange={(e) => setLevelFilter(e.target.value)}
-              className="h-10 pl-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 cursor-pointer"
+              className="h-10 pl-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none appearance-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 cursor-pointer transition-colors"
             >
               <option value="all">All Levels (L1 - L6)</option>
               {[1, 2, 3, 4, 5, 6].map(l => (
                 <option key={l} value={l}>Level {l}</option>
               ))}
             </select>
+            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
+          {/* Department Filter */}
           <div className="relative">
             <select
               value={deptFilter}
               onChange={(e) => setDeptFilter(e.target.value)}
-              className="h-10 pl-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 cursor-pointer"
+              className="h-10 pl-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none appearance-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 cursor-pointer transition-colors"
             >
               <option value="all">All Departments</option>
               {departments.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
+                <option key={d.id} value={d.id}>{d.name || formatDepartment(d.id)}</option>
               ))}
             </select>
+            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
         </div>
 
-        <span className="text-xs text-slate-500 font-medium">
-          Showing <strong className="text-slate-900">{sortedRows.length}</strong> designations
-        </span>
+        {/* Count indicator */}
+        <div className="text-xs text-slate-500 font-medium">
+          Showing <span className="text-slate-900 font-semibold">{filteredRows.length}</span> designations
+        </div>
 
       </div>
 
-      {/* Desktop Table View */}
-      <div className="hidden md:block bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Main Table Card */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold sticky top-0">
-              <tr>
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
                 <th 
                   onClick={() => handleSort('level')}
-                  className="py-3 px-4 cursor-pointer hover:text-slate-900 select-none whitespace-nowrap"
+                  className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition-colors"
                 >
                   <div className="flex items-center gap-1.5">
                     <span>Level</span>
-                    <ArrowUpDown className="w-3.5 h-3.5" />
+                    <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                   </div>
                 </th>
-
                 <th 
                   onClick={() => handleSort('title')}
-                  className="py-3 px-4 cursor-pointer hover:text-slate-900 select-none whitespace-nowrap"
+                  className="py-3 px-4 cursor-pointer hover:bg-slate-100 transition-colors"
                 >
                   <div className="flex items-center gap-1.5">
                     <span>Designation</span>
-                    <ArrowUpDown className="w-3.5 h-3.5" />
+                    <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                   </div>
                 </th>
-
-                <th className="py-3 px-4 whitespace-nowrap">Department</th>
-                <th className="py-3 px-4 whitespace-nowrap">Role Mapping</th>
-
+                <th className="py-3 px-4">Department</th>
                 <th 
                   onClick={() => handleSort('count')}
-                  className="py-3 px-4 cursor-pointer hover:text-slate-900 select-none whitespace-nowrap"
+                  className="py-3 px-4 text-right cursor-pointer hover:bg-slate-100 transition-colors"
                 >
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center justify-end gap-1.5">
                     <span>Employees</span>
-                    <ArrowUpDown className="w-3.5 h-3.5" />
+                    <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                   </div>
                 </th>
-
                 {canManageOrg && (
-                  <th className="py-3 px-4 text-right whitespace-nowrap">Actions</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 )}
               </tr>
             </thead>
-
             <tbody className="divide-y divide-slate-100">
-              {sortedRows.length === 0 ? (
+              {sortedRows.length > 0 ? (
+                sortedRows.map(row => {
+                  const levelConfig = LEVEL_STYLES[row.computedLevel] || LEVEL_STYLES[6];
+                  const title = row.title || row.name;
+                  const roleMapping = row.roleMapping || row.role;
+                  const hasDifferentRoleMapping = roleMapping && roleMapping.toLowerCase() !== title.toLowerCase();
+
+                  return (
+                    <tr 
+                      key={row.id}
+                      className="hover:bg-slate-50/60 transition-colors cursor-pointer group"
+                      onClick={() => onSelectDesignation && onSelectDesignation(row)}
+                    >
+                      {/* Level */}
+                      <td className="py-3 px-4 font-medium">
+                        <span className={`inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider ${levelConfig.bg} ${levelConfig.text} ${levelConfig.border}`}>
+                          L{row.computedLevel}
+                        </span>
+                      </td>
+
+                      {/* Designation Title & Role mapping subtitle */}
+                      <td className="py-3 px-4 font-semibold text-slate-900 group-hover:text-emerald-900">
+                        <div>
+                          <span>{title}</span>
+                          {hasDifferentRoleMapping && (
+                            <span className="block text-[11px] font-normal text-slate-400 mt-0.5">
+                              Maps to: {roleMapping}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Department */}
+                      <td className="py-3 px-4 text-slate-600">
+                        {formatDepartment(row.departmentId || row.department)}
+                      </td>
+
+                      {/* Employee count badge */}
+                      <td className="py-3 px-4 text-right font-semibold">
+                        <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[11px]">
+                          {pluralize(row.assignedCount, 'employee')}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      {canManageOrg && (
+                        <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => onEditDesignation && onEditDesignation(row)}
+                            className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors inline-flex items-center gap-1"
+                            title="Edit Designation"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })
+              ) : (
                 <tr>
-                  <td colSpan={canManageOrg ? 6 : 5} className="py-8 text-center text-slate-400">
-                    No designations match your criteria.
+                  <td colSpan={canManageOrg ? 5 : 4} className="py-12 text-center text-slate-400">
+                    No designations match the selected filters.
                   </td>
                 </tr>
-              ) : (
-                sortedRows.map(des => (
-                  <tr 
-                    key={des.id} 
-                    className="hover:bg-slate-50/80 transition-colors"
-                  >
-                    <td className="py-3 px-4 whitespace-nowrap font-mono font-bold">
-                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-                        L{des.computedLevel}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-4 font-semibold text-slate-900 whitespace-nowrap">
-                      {des.title || des.name}
-                    </td>
-
-                    <td className="py-3 px-4 text-slate-600 uppercase font-mono text-[11px] whitespace-nowrap">
-                      {des.departmentId || des.department || 'Operations'}
-                    </td>
-
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span className="font-mono text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200">
-                        {des.roleMapping || des.role || des.title}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => onSelectDesignation && onSelectDesignation(des.title || des.name)}
-                        className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 hover:underline"
-                      >
-                        {des.assignedCount} {des.assignedCount === 1 ? 'employee' : 'employees'}
-                      </button>
-                    </td>
-
-                    {canManageOrg && (
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => onEditDesignation && onEditDesignation(des)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-                          title="Edit Designation"
-                        >
-                          <Edit className="w-4 h-4" strokeWidth={1.75} />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))
               )}
             </tbody>
           </table>
         </div>
-      </div>
-
-      {/* Mobile Stacked Cards */}
-      <div className="md:hidden space-y-2.5">
-        {sortedRows.map(des => (
-          <div key={des.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                  L{des.computedLevel}
-                </span>
-                <h4 className="font-semibold text-sm text-slate-900 mt-1">
-                  {des.title || des.name}
-                </h4>
-                <p className="text-xs text-slate-500 uppercase font-mono mt-0.5">
-                  {des.departmentId || des.department || 'Operations'}
-                </p>
-              </div>
-
-              {canManageOrg && (
-                <button
-                  type="button"
-                  onClick={() => onEditDesignation && onEditDesignation(des)}
-                  className="p-2 text-slate-400 hover:text-slate-800 rounded-lg"
-                >
-                  <Edit className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-              <span className="font-mono text-[11px] text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
-                {des.roleMapping || des.role || des.title}
-              </span>
-
-              <button
-                type="button"
-                onClick={() => onSelectDesignation && onSelectDesignation(des.title || des.name)}
-                className="font-semibold text-emerald-700 hover:underline"
-              >
-                {des.assignedCount} staff
-              </button>
-            </div>
-          </div>
-        ))}
       </div>
 
     </div>

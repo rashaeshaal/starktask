@@ -1,5 +1,9 @@
+// src/EmployeeToolbar.jsx
+// Directory Toolbar: search, Department filter, Status filter, result count, and ghost reset button
+
 import React from 'react';
 import { Search, X, ChevronDown, RotateCcw } from 'lucide-react';
+import { formatDepartment } from './orgHelpers';
 
 export default function EmployeeToolbar({
   searchTerm,
@@ -28,7 +32,7 @@ export default function EmployeeToolbar({
           placeholder="Search by name, email, employee ID or designation…"
           value={searchTerm}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="w-full h-10 pl-9 pr-8 bg-slate-50/60 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-colors"
+          className="w-full h-10 pl-9 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-colors"
         />
         {searchTerm && (
           <button
@@ -50,11 +54,11 @@ export default function EmployeeToolbar({
           <select
             value={departmentFilter}
             onChange={(e) => onDepartmentFilterChange(e.target.value)}
-            className="h-10 pl-3 pr-8 bg-slate-50/60 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none appearance-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 cursor-pointer transition-colors"
+            className="h-10 pl-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none appearance-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 cursor-pointer transition-colors"
           >
             <option value="all">All Departments</option>
             {departments.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
+              <option key={d.id} value={d.id}>{d.name || formatDepartment(d.id)}</option>
             ))}
           </select>
           <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -65,7 +69,7 @@ export default function EmployeeToolbar({
           <select
             value={statusFilter}
             onChange={(e) => onStatusFilterChange(e.target.value)}
-            className="h-10 pl-3 pr-8 bg-slate-50/60 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none appearance-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 cursor-pointer transition-colors"
+            className="h-10 pl-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none appearance-none focus:bg-white focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 cursor-pointer transition-colors"
           >
             <option value="all">All Statuses</option>
             <option value="active">Active</option>
@@ -74,21 +78,21 @@ export default function EmployeeToolbar({
           <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
 
-        {/* Reset filters button (shows when any filter active) */}
+        {/* Reset filters ghost button */}
         {hasActiveFilters && (
           <button
             type="button"
             onClick={onResetFilters}
-            className="h-10 px-3 rounded-xl border border-dashed border-slate-300 text-slate-600 hover:text-slate-900 hover:bg-slate-50 text-xs font-medium flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+            className="h-10 px-3 text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-xl inline-flex items-center gap-1.5 transition-colors"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
-            <span>Reset filters</span>
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset</span>
           </button>
         )}
 
-        {/* Showing result count */}
-        <div className="text-xs font-medium text-slate-500 whitespace-nowrap pl-1">
-          Showing <span className="font-semibold text-slate-900">{filteredCount}</span> of {totalCount}
+        {/* Result Count Indicator */}
+        <div className="text-xs text-slate-500 font-medium px-2 whitespace-nowrap">
+          Showing <span className="text-slate-900 font-semibold">{filteredCount}</span> of {totalCount}
         </div>
 
       </div>
