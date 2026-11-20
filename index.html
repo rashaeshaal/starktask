@@ -17,11 +17,18 @@
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>
-      if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+      if ('serviceWorker' in navigator && window.location.protocol.startsWith('http') && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch((err) => {
             console.log('SW registration error:', err);
           });
+        });
+      } else if ('serviceWorker' in navigator && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+        // Automatically unregister active service workers during local development to avoid stale module interception
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister();
+          }
         });
       }
     </script>

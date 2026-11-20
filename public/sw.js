@@ -29,8 +29,15 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
-  // Only handle HTTP/HTTPS GET requests; ignore chrome-extension://, ws://, Firebase APIs, etc.
+  // Bypass service worker in dev mode or Vite HMR/module requests
   if (
+    url.includes('localhost') ||
+    url.includes('127.0.0.1') ||
+    url.includes('@vite') ||
+    url.includes('@fs') ||
+    url.includes('?t=') ||
+    url.includes('.jsx') ||
+    url.includes('.tsx') ||
     !url.startsWith('http://') && !url.startsWith('https://') ||
     event.request.method !== 'GET' ||
     url.includes('firestore.googleapis.com') ||
@@ -51,16 +58,17 @@ self.addEventListener('fetch', (event) => {
         }
         const responseToCache = networkResponse.clone();
         caches.open(CACHE_NAME).then((cache) => {
-          // Double-check scheme before caching
           if (event.request.url.startsWith('http')) {
             cache.put(event.request, responseToCache).catch(() => {});
           }
         });
         return networkResponse;
-      }).catch(() => {
+      }).catch(async () => {
         if (event.request.mode === 'navigate') {
-          return caches.match('/');
+          const fallback = await caches.match('/');
+          if (fallback) return fallback;
         }
+        return new Response('Network error', { status: 503, statusText: 'Service Unavailable' });
       });
     })
   );
