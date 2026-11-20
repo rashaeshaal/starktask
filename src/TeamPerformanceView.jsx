@@ -7,21 +7,19 @@ import {
 } from 'lucide-react';
 import { TASK_STATUSES } from './rbac';
 import { getTodayDateString, getDateOffset } from './dateUtils';
-import { COMPANY_DEPARTMENTS } from './orgTree';
 import { 
   getPerformanceScope, 
   getPerformanceVisibleEmployees, 
   isAllAccessPerformanceRole,
   SCOPES 
 } from './permissions';
+import { formatName, formatDepartment } from './orgHelpers';
 
 /**
- * TeamPerformanceView (SalesDoor Enterprise)
- * Strictly restricted by scope:
- * - Company Scope (Director Operations IHJAS K, Executive Director): All employees in all 10 departments, department filter.
- * - Department Scope (CSO, Operations Head, Accounts Manager, etc.): Employees in their department.
- * - Downline Scope (SSM, ASM, Team Leaders): Themselves ("You") + their recursive downline.
- * - Frontline: Blocked & redirected.
+ * TeamPerformanceView (STARK STEEL SalesDoor Enterprise)
+ * Dynamic Team Performance dashboard with real-time stats, 
+ * dynamic Firestore departments & teams, real 14-day task-based heatmap,
+ * Title Case formatting, and strict RBAC scopes.
  */
 export default function TeamPerformanceView({
   employees = [],
@@ -52,6 +50,27 @@ export default function TeamPerformanceView({
     return new Set(inScopeEmployees.map(e => String(e.id || e.uid || e.employeeId)));
   }, [inScopeEmployees]);
 
+  // Dynamic Departments list from Firestore or fallback
+  const dynamicDepartments = useMemo(() => {
+    if (departments && departments.length > 0) {
+      return departments.map(d => ({
+        id: String(d.id || d.slug || d.code || '').toLowerCase(),
+        name: formatDepartment(d.name || d.label || d.id)
+      }));
+    }
+    // Fallback if empty
+    return [
+      { id: 'sales', name: 'Sales' },
+      { id: 'operations', name: 'Operations' },
+      { id: 'hr_admin', name: 'HR & Admin' },
+      { id: 'finance', name: 'Finance & Accounts' },
+      { id: 'marketing', name: 'Marketing & Branding' },
+      { id: 'purchase', name: 'Purchase' },
+      { id: 'maintenance', name: 'Maintenance' },
+      { id: 'warehouse', name: 'Warehouse & Logistics' }
+    ];
+  }, [departments]);
+
   // Period Control
   const [period, setPeriod] = useState('today'); // 'today' | 'yesterday' | 'week' | 'month' | 'custom'
   const [customStart, setCustomStart] = useState(getDateOffset(-7));
@@ -63,6 +82,7 @@ export default function TeamPerformanceView({
   // Table Filters (Scope aware)
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDept, setSelectedDept] = useState('all');
+  const [selectedTeam, setSelectedTeam] = useState('all');
   const [selectedTeamMember, setSelectedTeamMember] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all'); // 'active' | 'completed' | 'overdue' | 'not_started'
   const [sortField, setSortField] = useState('completionRate');
@@ -82,7 +102,7 @@ export default function TeamPerformanceView({
     if (isDeptScope) {
       return {
         titleText: 'Team Performance',
-        subtitleText: `Your department performance (${currentUser.department || 'Department'})`
+        subtitleText: `Your department performance (${formatDepartment(currentUser?.department || 'Department')})`
       };
     }
     return {
@@ -107,7 +127,7 @@ export default function TeamPerformanceView({
       if (!isCompanyScope && !inScopeEmpIdSet.has(assignedId)) {
         return false;
       }
-      const taskDate = (t.taskDate || t.deadlineDate || t.createdAt || '').slice(0, 10);
+      const taskDate = (t.taskDate || t.date || t.deadlineDate || t.createdAt || '').slice(0, 10);
       if (!taskDate) return true;
       return taskDate >= startDate && taskDate <= endDate;
     });
@@ -118,11 +138,15 @@ export default function TeamPerformanceView({
     return inScopeEmployees.map(emp => {
       const empId = String(emp.id || emp.uid || emp.employeeId);
       const isSelf = empId === myId;
+      
+      // All period tasks for this specific employee
       const empTasks = periodTasks.filter(t => String(t.assignedToId || t.assignedTo) === empId);
+      // All historical tasks for this employee (for the 14-day heatmap)
+      const allEmpTasks = tasks.filter(t => String(t.assignedToId || t.assignedTo) === empId);
 
       const totalTasks = empTasks.length;
       const completedTasks = empTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
-      const pendingTasks = empTasks.filter(t => t.status === TASK_STATUSES.PENDING || t.status === 'Pending').length;
+      const pendingTasks = empTasks.filter(t => t.status === TASK_STATUSES.PENDING || t.status === 'Pending' || t.status === 'Assigned').length;
       const inProgressTasks = empTasks.filter(t => t.status === TASK_STATUSES.IN_PROGRESS || t.status === 'In Progress').length;
       
       const overdueTasks = empTasks.filter(t => {
@@ -133,7 +157,7 @@ export default function TeamPerformanceView({
 
       const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
-      // On-time rate
+      // Dynamic On-time rate
       const onTimeCompleted = empTasks.filter(t => {
         const isCompleted = t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed';
         if (!isCompleted) return false;
@@ -141,9 +165,9 @@ export default function TeamPerformanceView({
         const compDate = (t.lastUpdated || t.completedAt || t.deadlineDate).slice(0, 10);
         return compDate <= t.deadlineDate;
       }).length;
-      const onTimeRate = completedTasks > 0 ? Math.round((onTimeCompleted / completedTasks) * 100) : (totalTasks === 0 ? 100 : 85);
+      const onTimeRate = completedTasks > 0 ? Math.round((onTimeCompleted / completedTasks) * 100) : (totalTasks === 0 ? 100 : 0);
 
-      // Current Live Status
+      // Current Dynamic Live Status
       let liveStatus = 'not_started';
       if (completedTasks === totalTasks && totalTasks > 0) liveStatus = 'completed';
       else if (overdueTasks > 0) liveStatus = 'overdue';
@@ -156,9 +180,41 @@ export default function TeamPerformanceView({
         lastActivityTime = sortedEmpTasks[0].lastUpdated || sortedEmpTasks[0].createdAt;
       }
 
+      // Compute dynamic 14-day history for drawer heatmap
+      const dailyHeatmap = Array.from({ length: 14 }).map((_, i) => {
+        const dateStr = getDateOffset(i - 13);
+        const dayTasks = allEmpTasks.filter(t => {
+          const tDate = (t.taskDate || t.date || t.deadlineDate || t.createdAt || '').slice(0, 10);
+          return tDate === dateStr;
+        });
+        const dayTotal = dayTasks.length;
+        const dayDone = dayTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
+        const dayOverdue = dayTasks.filter(t => {
+          const isDone = t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed';
+          return !isDone && (dateStr < todayStr || t.status === 'Overdue');
+        }).length;
+
+        let statusType = 'none'; // 'none' | 'perfect' | 'partial' | 'overdue'
+        if (dayTotal > 0) {
+          if (dayDone === dayTotal) statusType = 'perfect';
+          else if (dayOverdue > 0) statusType = 'overdue';
+          else statusType = 'partial';
+        }
+
+        return {
+          date: dateStr,
+          dayNum: dateStr.slice(8),
+          total: dayTotal,
+          done: dayDone,
+          statusType
+        };
+      });
+
       return {
         ...emp,
         id: empId,
+        displayName: formatName(emp.fullName || emp.name || 'Employee'),
+        displayDept: formatDepartment(emp.department || emp.departmentId || 'Operations'),
         isSelf,
         totalTasks,
         completedTasks,
@@ -169,10 +225,11 @@ export default function TeamPerformanceView({
         onTimeRate,
         liveStatus,
         lastActivityTime,
-        tasks: empTasks
+        tasks: empTasks,
+        dailyHeatmap
       };
     });
-  }, [inScopeEmployees, periodTasks, todayStr, myId]);
+  }, [inScopeEmployees, periodTasks, tasks, todayStr, myId]);
 
   // Overall Summary Strip Metrics
   const summaryMetrics = useMemo(() => {
@@ -207,9 +264,9 @@ export default function TeamPerformanceView({
       // Search Query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchesName = (emp.fullName || emp.name || '').toLowerCase().includes(q);
+        const matchesName = (emp.displayName || '').toLowerCase().includes(q);
         const matchesDesignation = (emp.designation || '').toLowerCase().includes(q);
-        const matchesDept = (emp.department || emp.departmentName || '').toLowerCase().includes(q);
+        const matchesDept = (emp.displayDept || '').toLowerCase().includes(q);
         if (!matchesName && !matchesDesignation && !matchesDept) return false;
       }
 
@@ -239,8 +296,8 @@ export default function TeamPerformanceView({
       let valB = b[sortField];
 
       if (sortField === 'name') {
-        valA = a.fullName || a.name || '';
-        valB = b.fullName || b.name || '';
+        valA = a.displayName || '';
+        valB = b.displayName || '';
         return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
       }
 
@@ -254,9 +311,9 @@ export default function TeamPerformanceView({
   const handleExportCSV = () => {
     const headers = ['Employee Name', 'Designation', 'Department', 'Status', 'Tasks Done', 'Total Tasks', 'Completion %', 'Overdue Count', 'On-Time %'];
     const rows = filteredEmployees.map(emp => [
-      `"${emp.fullName || emp.name || ''}${emp.isSelf ? ' (You)' : ''}"`,
+      `"${emp.displayName}${emp.isSelf ? ' (You)' : ''}"`,
       `"${emp.designation || ''}"`,
-      `"${emp.department || ''}"`,
+      `"${emp.displayDept}"`,
       `"${emp.liveStatus}"`,
       emp.completedTasks,
       emp.totalTasks,
@@ -302,7 +359,7 @@ export default function TeamPerformanceView({
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{titleText}</h1>
             <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-              {isCompanyScope ? 'All 10 Departments' : isDeptScope ? 'Your Department' : 'Your Team'}
+              {isCompanyScope ? 'All Departments' : isDeptScope ? 'Your Department' : 'Your Team'}
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
@@ -313,7 +370,7 @@ export default function TeamPerformanceView({
         {/* Action Toolbar */}
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Period selector */}
-          <div className="flex items-center bg-white p-1 rounded-2xl border border-slate-200 shadow-2xs text-xs">
+          <div className="flex items-center bg-white p-1 rounded-2xl border border-slate-200 shadow-xs text-xs">
             {[
               { id: 'today', label: 'Today' },
               { id: 'yesterday', label: 'Yesterday' },
@@ -326,7 +383,7 @@ export default function TeamPerformanceView({
                 onClick={() => setPeriod(p.id)}
                 className={`px-3 py-1.5 rounded-xl font-medium transition ${
                   period === p.id 
-                    ? 'bg-[#05331F] text-white shadow-2xs' 
+                    ? 'bg-[#05331F] text-white shadow-xs' 
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                 }`}
               >
@@ -338,7 +395,7 @@ export default function TeamPerformanceView({
           {/* Export Button */}
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold shadow-2xs transition"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold shadow-xs transition"
           >
             <Download className="w-3.5 h-3.5 text-slate-500" />
             <span>Export CSV</span>
@@ -348,7 +405,7 @@ export default function TeamPerformanceView({
 
       {/* Custom Date Range Picker */}
       {period === 'custom' && (
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-wrap items-center gap-3 text-xs">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center gap-3 text-xs">
           <Calendar className="w-4 h-4 text-emerald-700" />
           <span className="font-semibold text-slate-700">Custom Date Range:</span>
           <input
@@ -367,10 +424,10 @@ export default function TeamPerformanceView({
         </div>
       )}
 
-      {/* Summary Strip (Calculated exclusively over in-scope employees) */}
+      {/* Summary Strip (Calculated dynamically over in-scope employees) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500">Active Execution</span>
             <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
@@ -381,7 +438,7 @@ export default function TeamPerformanceView({
           <p className="text-[11px] text-amber-600 font-medium mt-1">Currently progressing tasks</p>
         </div>
 
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500">Not Started</span>
             <div className="w-8 h-8 rounded-xl bg-slate-50 text-slate-600 flex items-center justify-center">
@@ -392,7 +449,7 @@ export default function TeamPerformanceView({
           <p className="text-[11px] text-slate-400 mt-1">Zero tasks logged for period</p>
         </div>
 
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500">Completed All</span>
             <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
@@ -403,7 +460,7 @@ export default function TeamPerformanceView({
           <p className="text-[11px] text-emerald-600 font-medium mt-1">100% finished tasks</p>
         </div>
 
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500">Overdue Tasks</span>
             <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
@@ -419,7 +476,7 @@ export default function TeamPerformanceView({
       </div>
 
       {/* Filter Toolbar Card */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           
           {/* Quick Tabs */}
@@ -428,7 +485,7 @@ export default function TeamPerformanceView({
               onClick={() => setQuickTab('all')}
               className={`px-3 py-1.5 rounded-xl font-medium transition ${
                 quickTab === 'all' 
-                  ? 'bg-[#05331F] text-white shadow-2xs' 
+                  ? 'bg-[#05331F] text-white shadow-xs' 
                   : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
@@ -438,7 +495,7 @@ export default function TeamPerformanceView({
               onClick={() => setQuickTab('top')}
               className={`px-3 py-1.5 rounded-xl font-medium transition flex items-center gap-1 ${
                 quickTab === 'top' 
-                  ? 'bg-[#05331F] text-white shadow-2xs' 
+                  ? 'bg-[#05331F] text-white shadow-xs' 
                   : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
@@ -449,7 +506,7 @@ export default function TeamPerformanceView({
               onClick={() => setQuickTab('attention')}
               className={`px-3 py-1.5 rounded-xl font-medium transition flex items-center gap-1 ${
                 quickTab === 'attention' 
-                  ? 'bg-[#05331F] text-white shadow-2xs' 
+                  ? 'bg-[#05331F] text-white shadow-xs' 
                   : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
@@ -458,7 +515,7 @@ export default function TeamPerformanceView({
             </button>
           </div>
 
-          {/* Search & Scope-Aware Dropdown Filters */}
+          {/* Search & Scope-Aware Dynamic Dropdown Filters */}
           <div className="flex flex-wrap items-center gap-2">
             
             {/* Search Input */}
@@ -473,24 +530,24 @@ export default function TeamPerformanceView({
               />
             </div>
 
-            {/* Department Filter (Visible ONLY for Company Scope / Director Operations) */}
+            {/* Dynamic Department Filter (Company Scope only) */}
             {isCompanyScope ? (
               <select
                 value={selectedDept}
                 onChange={(e) => setSelectedDept(e.target.value)}
-                className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50 text-slate-700"
+                className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50 text-slate-700 cursor-pointer"
               >
-                <option value="all">All 10 Departments</option>
-                {COMPANY_DEPARTMENTS.filter(d => d.id !== 'management').map(dept => (
+                <option value="all">All Departments ({dynamicDepartments.length})</option>
+                {dynamicDepartments.map(dept => (
                   <option key={dept.id} value={dept.id}>{dept.name}</option>
                 ))}
               </select>
             ) : (
-              /* Non-company scope sees Team/Member filter instead */
+              /* Non-company scope sees Team/Member filter */
               <select
                 value={selectedTeamMember}
                 onChange={(e) => setSelectedTeamMember(e.target.value)}
-                className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50 text-slate-700"
+                className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50 text-slate-700 cursor-pointer"
               >
                 <option value="all">All Squad Members ({inScopeEmployees.length})</option>
                 {inScopeEmployees.map(emp => {
@@ -498,7 +555,7 @@ export default function TeamPerformanceView({
                   const isSelf = empId === myId;
                   return (
                     <option key={empId} value={empId}>
-                      {emp.fullName || emp.name} {isSelf ? '(You)' : ''}
+                      {formatName(emp.fullName || emp.name)} {isSelf ? '(You)' : ''}
                     </option>
                   );
                 })}
@@ -509,7 +566,7 @@ export default function TeamPerformanceView({
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
-              className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50 text-slate-700"
+              className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50 text-slate-700 cursor-pointer"
             >
               <option value="all">All Statuses</option>
               <option value="active">Active Execution</option>
@@ -524,7 +581,7 @@ export default function TeamPerformanceView({
       </div>
 
       {/* Employees Table (Desktop) & Stacked Cards (Mobile) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         {filteredEmployees.length === 0 ? (
           <div className="p-12 text-center space-y-2">
             <Users className="w-8 h-8 text-slate-300 mx-auto" />
@@ -587,11 +644,11 @@ export default function TeamPerformanceView({
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
                             emp.isSelf ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700'
                           }`}>
-                            {(emp.fullName || emp.name || 'EM').slice(0, 2).toUpperCase()}
+                            {(emp.displayName || 'EM').slice(0, 2).toUpperCase()}
                           </div>
                           <div>
                             <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                              <span>{emp.fullName || emp.name}</span>
+                              <span>{emp.displayName}</span>
                               {emp.isSelf && (
                                 <span className="text-[10px] bg-[#05331F] text-white px-1.5 py-0.2 rounded font-bold">
                                   You
@@ -605,7 +662,7 @@ export default function TeamPerformanceView({
 
                       <td className="py-3 px-4">
                         <div className="font-semibold text-slate-800">{emp.designation || emp.role}</div>
-                        <div className="text-[11px] text-slate-500 capitalize">{emp.department || 'Operations'}</div>
+                        <div className="text-[11px] text-slate-500">{emp.displayDept}</div>
                       </td>
 
                       <td className="py-3 px-4 text-center">
@@ -678,11 +735,11 @@ export default function TeamPerformanceView({
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
                         emp.isSelf ? 'bg-emerald-700 text-white' : 'bg-slate-200 text-slate-700'
                       }`}>
-                        {(emp.fullName || emp.name || 'EM').slice(0, 2).toUpperCase()}
+                        {(emp.displayName || 'EM').slice(0, 2).toUpperCase()}
                       </div>
                       <div>
                         <div className="font-bold text-slate-900 text-xs flex items-center gap-1">
-                          <span>{emp.fullName || emp.name}</span>
+                          <span>{emp.displayName}</span>
                           {emp.isSelf && (
                             <span className="text-[9px] bg-[#05331F] text-white px-1.5 py-0.2 rounded font-bold">
                               You
@@ -737,23 +794,24 @@ export default function TeamPerformanceView({
             <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-800 font-bold flex items-center justify-center border border-emerald-200">
-                  {(selectedEmployee.fullName || selectedEmployee.name || 'EM').slice(0, 2).toUpperCase()}
+                  {(selectedEmployee.displayName || 'EM').slice(0, 2).toUpperCase()}
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
-                    <span>{selectedEmployee.fullName || selectedEmployee.name}</span>
+                    <span>{selectedEmployee.displayName}</span>
                     {selectedEmployee.isSelf && (
                       <span className="text-[10px] bg-[#05331F] text-white px-2 py-0.5 rounded font-bold">
                         You
                       </span>
                     )}
                   </h3>
-                  <p className="text-xs text-slate-500">{selectedEmployee.designation} {' \u00B7 '} {selectedEmployee.department}</p>
+                  <p className="text-xs text-slate-500">{selectedEmployee.designation} {' \u00B7 '} {selectedEmployee.displayDept}</p>
                 </div>
               </div>
               <button 
                 onClick={() => setSelectedEmployee(null)} 
-                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 cursor-pointer"
+                aria-label="Close details"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -778,25 +836,49 @@ export default function TeamPerformanceView({
                 </div>
               </div>
 
-              {/* 14-Day Calendar Heatmap */}
+              {/* Real Dynamic 14-Day Calendar Heatmap */}
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
-                <p className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">
-                  14-Day Performance Heatmap
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">
+                    14-Day Performance Heatmap
+                  </p>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-600 inline-block"></span> 100%</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span> Partial</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> Overdue</span>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-7 gap-1.5 pt-1">
-                  {Array.from({ length: 14 }).map((_, i) => {
-                    const d = getDateOffset(i - 13);
-                    const isToday = d === todayStr;
+                  {(selectedEmployee.dailyHeatmap || []).map((day) => {
+                    const isToday = day.date === todayStr;
+                    
+                    let bgStyle = "bg-white border-slate-200 text-slate-700";
+                    let badgeText = "—";
+                    
+                    if (day.statusType === 'perfect') {
+                      bgStyle = isToday 
+                        ? "bg-[#05331F] text-white border-[#05331F]" 
+                        : "bg-emerald-600 text-white border-emerald-700";
+                      badgeText = `${day.done}/${day.total}`;
+                    } else if (day.statusType === 'overdue') {
+                      bgStyle = "bg-rose-50 text-rose-700 border-rose-300";
+                      badgeText = `${day.done}/${day.total}`;
+                    } else if (day.statusType === 'partial') {
+                      bgStyle = "bg-amber-50 text-amber-700 border-amber-300";
+                      badgeText = `${day.done}/${day.total}`;
+                    } else if (isToday) {
+                      bgStyle = "bg-slate-100 border-slate-300 text-slate-900 font-semibold";
+                    }
+
                     return (
                       <div 
-                        key={d} 
-                        className={`p-2 rounded-lg text-center border ${
-                          isToday ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white border-slate-200 text-slate-700'
-                        }`}
-                        title={d}
+                        key={day.date} 
+                        className={`p-2 rounded-lg text-center border transition ${bgStyle}`}
+                        title={`${day.date}: ${day.total > 0 ? `${day.done}/${day.total} tasks completed` : 'No tasks'}`}
                       >
-                        <span className="block text-[9px] opacity-75">{d.slice(8)}</span>
-                        <span className="block font-bold text-[10px]">✓</span>
+                        <span className="block text-[9px] opacity-75">{day.dayNum}</span>
+                        <span className="block font-bold text-[10px] truncate">{badgeText}</span>
                       </div>
                     );
                   })}
@@ -814,12 +896,12 @@ export default function TeamPerformanceView({
                       onClick={() => {
                         onOpenAssignModal({
                           memberId: selectedEmployee.id,
-                          memberName: selectedEmployee.fullName || selectedEmployee.name,
+                          memberName: selectedEmployee.displayName,
                           department: selectedEmployee.department
                         });
                         setSelectedEmployee(null);
                       }}
-                      className="text-xs font-semibold text-emerald-800 hover:underline flex items-center gap-1"
+                      className="text-xs font-semibold text-emerald-800 hover:underline flex items-center gap-1 cursor-pointer"
                     >
                       <Send className="w-3 h-3" />
                       <span>Assign Task</span>
@@ -870,7 +952,7 @@ export default function TeamPerformanceView({
               </span>
               <button
                 onClick={() => setSelectedEmployee(null)}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs"
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-semibold text-xs cursor-pointer"
               >
                 Close
               </button>
