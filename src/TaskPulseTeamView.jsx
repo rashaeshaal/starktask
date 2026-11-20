@@ -73,6 +73,7 @@ export default function TaskPulseTeamView({
   departments = [],
   currentUser,
   loading = false,
+  initialViewMode = 'my_tasks',
   onTaskCreated,
   onTaskUpdated,
   onOpenTaskDetails,
@@ -99,8 +100,14 @@ export default function TaskPulseTeamView({
                                 isServiceManager || isInventorySupervisor || userRole.includes('Supervisor') || 
                                 userRole.includes('Coordinator') || userRole.includes('Manager');
 
-  // View Mode: 'my_tasks' | 'sales_linked' | 'marketing_requests'
-  const [viewMode, setViewMode] = useState('my_tasks');
+  // View Mode: 'my_tasks' | 'assigned_by_me' | 'sales_linked' | 'marketing_requests'
+  const [viewMode, setViewMode] = useState(initialViewMode);
+
+  useEffect(() => {
+    if (initialViewMode) {
+      setViewMode(initialViewMode);
+    }
+  }, [initialViewMode]);
 
   // Date Navigation State
   const [dateFilter, setDateFilter] = useState('today');
@@ -182,6 +189,12 @@ export default function TaskPulseTeamView({
       } else if (viewMode === 'marketing_requests') {
         const isReq = task.isMarketingRequest || task.category === 'Marketing Request' || (task.departmentId === 'marketing' && task.requestedBy != null);
         if (!isReq) return false;
+      } else if (viewMode === 'assigned_by_me') {
+        // Tasks assigned by this user to downline / others
+        const byId = String(task.assignedById || task.createdById || '');
+        const isAssignedByMe = (currentUserId && byId === currentUserId) || 
+                               (currentUserEmpId && byId === currentUserEmpId);
+        if (!isAssignedByMe) return false;
       } else {
         // Standard My Tasks view
         const taskAssigneeId = String(task.assignedToId || task.assignedTo || '');
@@ -265,6 +278,9 @@ export default function TaskPulseTeamView({
     }
     if (viewMode === 'marketing_requests') {
       return `${marketingRequests.length} incoming cross-department requests`;
+    }
+    if (viewMode === 'assigned_by_me') {
+      return `${userFilteredTasks.length} ${userFilteredTasks.length === 1 ? 'task delegated to team' : 'tasks delegated to team'}`;
     }
     if (dateFilter === 'today') {
       return `${todayCount} ${todayCount === 1 ? 'task today' : 'tasks today'}`;
@@ -531,10 +547,12 @@ export default function TaskPulseTeamView({
                   ? 'Orders from Sales' 
                   : viewMode === 'marketing_requests' 
                   ? 'Marketing Requests' 
+                  : viewMode === 'assigned_by_me'
+                  ? 'Tasks Assigned by Me'
                   : 'My Tasks'}
               </h1>
 
-              {/* Tab Toggles for Operations Leadership & Marketing */}
+              {/* Tab Toggles */}
               <div className="flex items-center p-0.5 bg-slate-200 rounded-xl ml-2 text-xs">
                 <button
                   type="button"
@@ -544,6 +562,17 @@ export default function TaskPulseTeamView({
                   }`}
                 >
                   My Work
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setViewMode('assigned_by_me')}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition min-h-[36px] flex items-center gap-1.5 ${
+                    viewMode === 'assigned_by_me' ? 'bg-[#05331F] text-white shadow-2xs font-bold' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Assigned by Me</span>
                 </button>
 
                 {(isWarehouseInCharge || isTransportManager || isOperationsHead || isFinanceRole) && (
@@ -831,7 +860,13 @@ export default function TaskPulseTeamView({
                               </div>
                             )}
                             <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5 flex-wrap">
-                              {task.assignedByName && task.assignedById !== currentUserId && (
+                              {viewMode === 'assigned_by_me' && task.assignedToName && (
+                                <span className="bg-blue-50 text-blue-900 border border-blue-200/80 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                                  <span>Assigned to:</span>
+                                  <strong className="text-blue-950 font-bold">{task.assignedToName}</strong>
+                                </span>
+                              )}
+                              {viewMode !== 'assigned_by_me' && task.assignedByName && task.assignedById !== currentUserId && (
                                 <span className="bg-emerald-50 text-[#05331F] border border-emerald-200/80 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
                                   <span>Assigned by:</span>
                                   <strong className="text-emerald-950 font-bold">{task.assignedByName}</strong>
@@ -1012,7 +1047,13 @@ export default function TaskPulseTeamView({
                             </p>
                           )}
                           <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1 flex-wrap">
-                            {task.assignedByName && task.assignedById !== currentUserId && (
+                            {viewMode === 'assigned_by_me' && task.assignedToName && (
+                              <span className="bg-blue-50 text-blue-900 border border-blue-200/80 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                                <span>Assigned to:</span>
+                                <strong className="text-blue-950 font-bold">{task.assignedToName}</strong>
+                              </span>
+                            )}
+                            {viewMode !== 'assigned_by_me' && task.assignedByName && task.assignedById !== currentUserId && (
                               <span className="bg-emerald-50 text-[#05331F] border border-emerald-200/80 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
                                 <span>Assigned by:</span>
                                 <strong className="text-emerald-950 font-bold">{task.assignedByName}</strong>

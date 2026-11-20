@@ -4,7 +4,7 @@ import {
   Users, Layers, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   Settings, LogOut, ChevronLeft, ChevronRight, X, Shield, 
   Calendar, RefreshCw, UserCheck, CheckSquare, Briefcase,
-  TrendingUp, Award, FileText, Check, Package, BookOpen
+  TrendingUp, Award, FileText, Check, Package, BookOpen, Send
 } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { getScope, canAccess, SCOPES, PAGES } from './permissions';
@@ -42,6 +42,7 @@ export default function Sidebar({
   const canSeeTeamPerf = canAccess(currentUser, PAGES.TEAM_PERFORMANCE);
   const canSeeAllTasks = canAccess(currentUser, PAGES.ALL_TASKS);
   const canSeeMyTasks = canAccess(currentUser, PAGES.MY_TASKS);
+  const canSeeAssignedTasks = canAccess(currentUser, PAGES.ASSIGNED_TASKS);
   const canSeeApprovals = canAccess(currentUser, PAGES.APPROVALS);
   const canSeeEscalations = canAccess(currentUser, PAGES.ESCALATIONS);
   const canSeeTodos = canAccess(currentUser, PAGES.TODOS);
@@ -297,6 +298,29 @@ export default function Sidebar({
                 >
                   <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
                   {!isCollapsed && <span>My Tasks</span>}
+                </button>
+              )}
+
+              {/* Tasks Assigned by Me */}
+              {canSeeAssignedTasks && (
+                <button
+                  onClick={() => handleNavClick('assigned_tasks')}
+                  title={isCollapsed ? 'Assigned by Me' : ''}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
+                    activeTab === 'assigned_tasks'
+                      ? 'bg-[#0d4a2d] text-white shadow-xs'
+                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Send className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {!isCollapsed && <span>Assigned by Me</span>}
+                  </div>
+                  {!isCollapsed && (taskCounts?.assignedByMeCount > 0) && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                      {taskCounts.assignedByMeCount}
+                    </span>
+                  )}
                 </button>
               )}
 

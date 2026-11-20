@@ -256,13 +256,23 @@ export default function App() {
   ).length;
 
   // Task Counts for Badges
+  const assignedByMeCount = useMemo(() => {
+    if (!currentUid) return 0;
+    const empId = activeEmployee?.employeeId;
+    return tasks.filter(t => {
+      const byId = String(t.assignedById || t.createdById || '');
+      return byId === currentUid || (empId && byId === String(empId));
+    }).length;
+  }, [tasks, currentUid, activeEmployee]);
+
   const taskCounts = {
     total: tasks.length,
     today: tasks.filter(t => (t.taskDate || t.deadlineDate || '').startsWith(todayStr)).length,
     inProgress: tasks.filter(t => t.status === TASK_STATUSES.IN_PROGRESS).length,
     overdue: tasks.filter(t => t.deadlineDate && t.deadlineDate < todayStr && t.status !== TASK_STATUSES.COMPLETED).length,
     blocked: tasks.filter(t => t.status === TASK_STATUSES.BLOCKED || t.status === 'Blocked').length,
-    completed: tasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length
+    completed: tasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length,
+    assignedByMeCount
   };
 
   // Due reminders count
@@ -816,6 +826,25 @@ export default function App() {
                 teamMembers={teamMembers}
                 departments={departments}
                 currentUser={activeEmployee}
+                initialViewMode="my_tasks"
+                onTaskCreated={handleTaskCreated}
+                onTaskUpdated={handleTaskUpdated}
+                onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
+                onOpenAssignModal={() => setIsAssignModalOpen(true)}
+                onFollowUpTask={handleFollowUpTask}
+              />
+            )}
+
+            {/* VIEW 8B: Tasks Assigned By Me */}
+            {activeTab === 'assigned_tasks' && (
+              <TaskPulseTeamView
+                tasks={tasks}
+                employees={employees}
+                teams={teams}
+                teamMembers={teamMembers}
+                departments={departments}
+                currentUser={activeEmployee}
+                initialViewMode="assigned_by_me"
                 onTaskCreated={handleTaskCreated}
                 onTaskUpdated={handleTaskUpdated}
                 onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}

@@ -21,6 +21,7 @@ export const PAGES = {
   TEAM_PERFORMANCE: 'team_performance',
   MY_TASKS: 'my_tasks',
   ALL_TASKS: 'all_tasks',
+  ASSIGNED_TASKS: 'assigned_tasks',
   APPROVALS: 'approvals',
   ESCALATIONS: 'escalations',
   TODOS: 'todos',
@@ -620,6 +621,9 @@ export function canAccess(user, page) {
 
   // Map tab variations
   let target = page;
+  if (page === 'assigned_tasks' || page === PAGES.ASSIGNED_TASKS) {
+    return Boolean(config.canAssign);
+  }
   if (page === 'my_tasks' || page === 'all_tasks') {
     if (page === 'all_tasks') return config.menu.includes(PAGES.ALL_TASKS);
     return config.menu.includes(PAGES.MY_TASKS);
