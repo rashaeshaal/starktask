@@ -293,3 +293,4 @@ export function buildHierarchy(employees = []) {
 
   return { rootNodes: roots, orphanNodes };
 }
+
