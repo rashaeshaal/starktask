@@ -296,6 +296,7 @@ export default function CompanyDashboardView({
   // Team-Based Performance Breakdown (Dynamic Graph for All Teams & In-Scope Employees)
   const [selectedPerfTeamId, setSelectedPerfTeamId] = useState('all');
   const [perfTimeframe, setPerfTimeframe] = useState('today'); // 'today' | '7days' | 'month'
+  const [perfGraphType, setPerfGraphType] = useState('bars'); // 'bars' | 'trend' | 'donut' | 'radar'
 
   const inScopePerfEmployees = useMemo(() => {
     return getPerformanceVisibleEmployees(currentUser, employees);
@@ -341,6 +342,18 @@ export default function CompanyDashboardView({
     return map;
   }, [inScopePerfEmployees, tasks, perfStartDate, todayStr]);
 
+  // 7-day trend breakdown per team
+  const last7DaysList = useMemo(() => {
+    return Array.from({ length: 7 }).map((_, i) => {
+      const d = getDateOffset(i - 6);
+      return {
+        dateStr: d,
+        dayLabel: new Date(d).toLocaleDateString('en-US', { weekday: 'short' }),
+        dayNum: d.slice(8)
+      };
+    });
+  }, []);
+
   // Aggregate by Team
   const teamPerformanceData = useMemo(() => {
     const inScopeEmpIdSet = new Set(inScopePerfEmployees.map(e => String(e.id || e.uid || e.employeeId)));
@@ -385,6 +398,26 @@ export default function CompanyDashboardView({
 
       const teamRate = teamTotal > 0 ? Math.round((teamDone / teamTotal) * 100) : 0;
 
+      // Calculate 7-day trend history for this team
+      const memberIdSet = new Set(allTeamIds);
+      const trend7Days = last7DaysList.map(d => {
+        const dayTasks = tasks.filter(task => {
+          const aId = String(task.assignedToId || task.assignedTo || '');
+          if (!memberIdSet.has(aId)) return false;
+          const taskDate = (task.taskDate || task.date || task.deadlineDate || task.createdAt || '').slice(0, 10);
+          return taskDate === d.dateStr;
+        });
+        const dTotal = dayTasks.length;
+        const dDone = dayTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
+        const dRate = dTotal > 0 ? Math.round((dDone / dTotal) * 100) : 0;
+        return {
+          ...d,
+          total: dTotal,
+          done: dDone,
+          rate: dRate
+        };
+      });
+
       return {
         id: t.id,
         name: formatName(t.name),
@@ -394,12 +427,14 @@ export default function CompanyDashboardView({
         total: teamTotal,
         done: teamDone,
         ovd: teamOvd,
-        rate: teamRate
+        pending: Math.max(0, teamTotal - teamDone - teamOvd),
+        rate: teamRate,
+        trend7Days
       };
     });
 
     return list;
-  }, [teams, inScopePerfEmployees, empPerfMap]);
+  }, [teams, inScopePerfEmployees, empPerfMap, last7DaysList, tasks]);
 
   // Determine teams to show (or all)
   const activeDisplayedTeams = useMemo(() => {
@@ -522,8 +557,30 @@ export default function CompanyDashboardView({
               </div>
             </div>
 
-            {/* Filter controls: Squad Selector & Timeframe */}
+            {/* Filter controls: Graph Type, Squad Selector & Timeframe */}
             <div className="flex flex-wrap items-center gap-2">
+              
+              {/* Variety Graph Type Switcher */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs">
+                {[
+                  { id: 'bars', label: 'Bar Graph' },
+                  { id: 'trend', label: '7-Day Trend' },
+                  { id: 'donut', label: 'Donut Share' }
+                ].map(g => (
+                  <button
+                    key={g.id}
+                    onClick={() => setPerfGraphType(g.id)}
+                    className={`px-2.5 py-1 rounded-lg font-medium transition cursor-pointer ${
+                      perfGraphType === g.id 
+                        ? 'bg-[#05331F] text-white shadow-2xs' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+
               <select
                 value={selectedPerfTeamId}
                 onChange={(e) => setSelectedPerfTeamId(e.target.value)}
@@ -557,7 +614,7 @@ export default function CompanyDashboardView({
             </div>
           </div>
 
-          {/* Teams Grid of Graphs */}
+          {/* Teams Grid of Graphs with Selected Variety View */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             {activeDisplayedTeams.map(team => (
               <div 
@@ -584,77 +641,245 @@ export default function CompanyDashboardView({
                   </div>
                 </div>
 
-                {/* Team Overall Bar */}
-                <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                  <div 
-                    className="bg-[#05331F] h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${team.rate}%` }}
-                  />
-                </div>
-
-                {/* Per-Employee Graph Bars */}
-                <div className="space-y-2.5 pt-1">
-                  {team.members.length === 0 ? (
-                    <div className="text-center py-4 text-slate-400 text-xs">
-                      No members assigned to this squad yet.
+                {/* GRAPH VARIETY 1: Horizontal Progress Bar Breakdown */}
+                {perfGraphType === 'bars' && (
+                  <div className="space-y-3">
+                    <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-[#05331F] h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${team.rate}%` }}
+                      />
                     </div>
-                  ) : (
-                    team.members.map(member => (
-                      <div key={member.id} className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="font-bold text-slate-800 truncate">{member.name}</span>
-                            {member.isLeader && (
-                              <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-semibold shrink-0">
-                                Lead
-                              </span>
-                            )}
-                            <span className="text-[11px] text-slate-400 truncate">({member.role})</span>
-                          </div>
 
-                          <div className="flex items-center gap-3 shrink-0 text-[11px]">
-                            {member.ovd > 0 && (
-                              <span className="text-rose-600 font-semibold bg-rose-50 px-1.5 py-0.2 rounded">
-                                {member.ovd} overdue
-                              </span>
-                            )}
-                            <span className="text-slate-600 font-medium">
-                              {member.done}/{member.total}
-                            </span>
-                            <span className="font-bold text-[#05331F] min-w-[32px] text-right">
-                              {member.rate}%
-                            </span>
-                          </div>
+                    <div className="space-y-2 pt-1">
+                      {team.members.length === 0 ? (
+                        <div className="text-center py-4 text-slate-400 text-xs">
+                          No members assigned to this squad yet.
                         </div>
+                      ) : (
+                        team.members.map(member => (
+                          <div key={member.id} className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="font-bold text-slate-800 truncate">{member.name}</span>
+                                {member.isLeader && (
+                                  <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-semibold shrink-0">
+                                    Lead
+                                  </span>
+                                )}
+                                <span className="text-[11px] text-slate-400 truncate">({member.role})</span>
+                              </div>
 
-                        {/* Dual-color performance bar: Completed (Emerald) + In-progress (Amber) + Overdue (Rose) */}
-                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden flex">
-                          {member.total > 0 ? (
-                            <>
+                              <div className="flex items-center gap-3 shrink-0 text-[11px]">
+                                {member.ovd > 0 && (
+                                  <span className="text-rose-600 font-semibold bg-rose-50 px-1.5 py-0.2 rounded">
+                                    {member.ovd} overdue
+                                  </span>
+                                )}
+                                <span className="text-slate-600 font-medium">
+                                  {member.done}/{member.total}
+                                </span>
+                                <span className="font-bold text-[#05331F] min-w-[32px] text-right">
+                                  {member.rate}%
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Multi-segment execution bar */}
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden flex">
+                              {member.total > 0 ? (
+                                <>
+                                  <div 
+                                    className="bg-emerald-600 h-full transition-all duration-300"
+                                    style={{ width: `${(member.done / member.total) * 100}%` }}
+                                    title={`Completed: ${member.done}`}
+                                  />
+                                  <div 
+                                    className="bg-amber-400 h-full transition-all duration-300"
+                                    style={{ width: `${(Math.max(0, member.total - member.done - member.ovd) / member.total) * 100}%` }}
+                                    title={`In Progress: ${Math.max(0, member.total - member.done - member.ovd)}`}
+                                  />
+                                  <div 
+                                    className="bg-rose-500 h-full transition-all duration-300"
+                                    style={{ width: `${(member.ovd / member.total) * 100}%` }}
+                                    title={`Overdue: ${member.ovd}`}
+                                  />
+                                </>
+                              ) : (
+                                <div className="bg-slate-200 h-full w-full" title="No tasks logged" />
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* GRAPH VARIETY 2: 7-Day Velocity Column Trend Chart */}
+                {perfGraphType === 'trend' && (
+                  <div className="space-y-3 bg-white p-3.5 rounded-xl border border-slate-100 shadow-2xs">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-800">Squad 7-Day Velocity Trend</span>
+                      <span className="text-[11px] text-slate-400">Tasks Completed Daily</span>
+                    </div>
+
+                    <div className="h-32 flex items-end justify-between gap-2 pt-4 px-2 border-b border-slate-100">
+                      {team.trend7Days.map(d => {
+                        const maxH = Math.max(...team.trend7Days.map(x => x.total), 1);
+                        const totalPct = Math.round((d.total / maxH) * 100);
+                        const donePct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 0;
+                        const isToday = d.dateStr === todayStr;
+
+                        return (
+                          <div key={d.dateStr} className="flex-1 flex flex-col items-center gap-1 group relative">
+                            {/* Hover tooltip */}
+                            <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] px-2 py-1 rounded shadow-md pointer-events-none whitespace-nowrap z-10">
+                              {d.done} / {d.total} Done ({d.rate}%)
+                            </div>
+
+                            {/* Bar Column */}
+                            <div className="w-full max-w-[28px] h-24 bg-slate-100 rounded-t-lg flex flex-col justify-end overflow-hidden">
                               <div 
-                                className="bg-emerald-600 h-full transition-all duration-300"
-                                style={{ width: `${(member.done / member.total) * 100}%` }}
-                                title={`Completed: ${member.done}`}
+                                className={`w-full rounded-t-lg transition-all duration-300 ${isToday ? 'bg-[#05331F]' : 'bg-emerald-600'}`}
+                                style={{ height: `${Math.max(totalPct > 0 ? 12 : 4, (d.done / maxH) * 100)}%` }}
                               />
-                              <div 
-                                className="bg-amber-400 h-full transition-all duration-300"
-                                style={{ width: `${(Math.max(0, member.total - member.done - member.ovd) / member.total) * 100}%` }}
-                                title={`In Progress: ${Math.max(0, member.total - member.done - member.ovd)}`}
+                            </div>
+
+                            {/* Label */}
+                            <span className={`text-[10px] ${isToday ? 'font-bold text-[#05331F]' : 'text-slate-500'}`}>
+                              {d.dayLabel}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Member trend list */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 text-xs">
+                      {team.members.map(m => (
+                        <div key={m.id} className="p-2 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+                          <span className="truncate text-slate-700 font-medium text-[11px]">{m.name}</span>
+                          <span className="font-bold text-[#05331F] text-[11px]">{m.rate}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* GRAPH VARIETY 3: SVG Circular Donut Chart with Status Distribution */}
+                {perfGraphType === 'donut' && (
+                  <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-2xs space-y-4">
+                    <div className="flex flex-col sm:flex-row items-center justify-around gap-4">
+                      {/* Interactive SVG Donut */}
+                      <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                        {(() => {
+                          const circumference = 2 * Math.PI * 40; // ~251.3
+                          const total = Math.max(team.total, 1);
+                          const doneDash = (team.done / total) * circumference;
+                          const pendDash = (team.pending / total) * circumference;
+                          const ovdDash = (team.ovd / total) * circumference;
+
+                          return (
+                            <svg className="w-28 h-28 transform -rotate-90" viewBox="0 0 100 100">
+                              <circle
+                                cx="50"
+                                cy="50"
+                                r="40"
+                                className="text-slate-100"
+                                strokeWidth="12"
+                                stroke="currentColor"
+                                fill="transparent"
                               />
-                              <div 
-                                className="bg-rose-500 h-full transition-all duration-300"
-                                style={{ width: `${(member.ovd / member.total) * 100}%` }}
-                                title={`Overdue: ${member.ovd}`}
+                              {/* Completed Ring (Emerald) */}
+                              <circle
+                                cx="50"
+                                cy="50"
+                                r="40"
+                                className="text-emerald-600 transition-all duration-500"
+                                strokeWidth="12"
+                                strokeDasharray={`${doneDash} ${circumference}`}
+                                strokeDashoffset="0"
+                                stroke="currentColor"
+                                fill="transparent"
                               />
-                            </>
-                          ) : (
-                            <div className="bg-slate-200 h-full w-full" title="No tasks logged" />
-                          )}
+                              {/* Pending Ring (Amber) */}
+                              <circle
+                                cx="50"
+                                cy="50"
+                                r="40"
+                                className="text-amber-400 transition-all duration-500"
+                                strokeWidth="12"
+                                strokeDasharray={`${pendDash} ${circumference}`}
+                                strokeDashoffset={`-${doneDash}`}
+                                stroke="currentColor"
+                                fill="transparent"
+                              />
+                              {/* Overdue Ring (Rose) */}
+                              <circle
+                                cx="50"
+                                cy="50"
+                                r="40"
+                                className="text-rose-500 transition-all duration-500"
+                                strokeWidth="12"
+                                strokeDasharray={`${ovdDash} ${circumference}`}
+                                strokeDashoffset={`-${doneDash + pendDash}`}
+                                stroke="currentColor"
+                                fill="transparent"
+                              />
+                            </svg>
+                          );
+                        })()}
+
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                          <span className="text-base font-extrabold text-slate-900">{team.rate}%</span>
+                          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Done</span>
                         </div>
                       </div>
-                    ))
-                  )}
-                </div>
+
+                      {/* Legend */}
+                      <div className="space-y-1.5 text-xs w-full max-w-[180px]">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block" />
+                            <span className="text-slate-600 text-[11px]">Completed</span>
+                          </div>
+                          <span className="font-bold text-slate-800">{team.done}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+                            <span className="text-slate-600 text-[11px]">In Progress</span>
+                          </div>
+                          <span className="font-bold text-slate-800">{team.pending}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block" />
+                            <span className="text-slate-600 text-[11px]">Overdue</span>
+                          </div>
+                          <span className="font-bold text-rose-600">{team.ovd}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Member contributions */}
+                    <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Squad Member Breakdown
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        {team.members.map(m => (
+                          <div key={m.id} className="p-2 rounded-lg bg-slate-50 flex items-center justify-between">
+                            <span className="truncate text-slate-800 font-medium text-[11px]">{m.name}</span>
+                            <span className="font-bold text-emerald-700 text-[11px]">{m.done}/{m.total}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
               </div>
             ))}
           </div>
