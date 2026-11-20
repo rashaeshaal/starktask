@@ -795,7 +795,8 @@ export default function TaskPulseTeamView({
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50/50 text-slate-500 font-semibold uppercase text-[10px]">
                       <th className="py-2.5 px-3 w-10 text-center">Done</th>
-                      <th className="py-2.5 px-3 w-2/5">Task & Reference</th>
+                      <th className="py-2.5 px-3 w-1/3">Task & Reference</th>
+                      <th className="py-2.5 px-3 w-32">Assignee</th>
                       {dateFilter === 'all' && <th className="py-2.5 px-3 w-24">Date</th>}
                       <th className="py-2.5 px-3 w-28 hidden lg:table-cell">Dept / Location</th>
                       <th className="py-2.5 px-3 w-20">Priority</th>
@@ -885,6 +886,25 @@ export default function TaskPulseTeamView({
                                   {task.photos.length} photo proof
                                 </span>
                               )}
+                            </div>
+                          </td>
+
+                          {/* Assignee Column */}
+                          <td className="py-2.5 px-3 align-middle text-slate-700 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <div className="w-5 h-5 rounded-full bg-emerald-100 text-[#05331F] font-bold flex items-center justify-center text-[10px] shrink-0 border border-emerald-200">
+                                {(task.assignedToName || 'U').charAt(0).toUpperCase()}
+                              </div>
+                              <div className="truncate">
+                                <span className="font-semibold text-slate-800 truncate block max-w-[110px]" title={task.assignedToName || 'Unassigned'}>
+                                  {task.assignedToName || 'Unassigned'}
+                                </span>
+                                {task.assignedToRole && (
+                                  <span className="text-[10px] text-slate-400 block truncate max-w-[110px]">
+                                    {task.assignedToRole}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
 
