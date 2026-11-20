@@ -3,7 +3,7 @@ import {
   CheckCircle2, Clock, AlertTriangle, AlertCircle, Calendar, 
   Search, CheckSquare, Square, Eye, Edit3, Trash2, MoreHorizontal,
   PlusCircle, Filter, X, Check, Loader2, Megaphone, GitFork, User,
-  Camera, MapPin, Truck, ExternalLink
+  Camera, MapPin, Truck, ExternalLink, Send
 } from 'lucide-react';
 import { TASK_STATUSES, TASK_PRIORITIES, isTaskLockedForUser } from './rbac';
 import { getTodayDateString, getDateOffset } from './dateUtils';
