@@ -15,9 +15,11 @@ import {
   canAccess,
   SCOPES, 
   PAGES,
-  normalizeRoleName 
+  normalizeRoleName,
+  getPerformanceVisibleEmployees 
 } from './permissions';
 import { canAccessSales } from './salesPermissions';
+import { formatName, formatDepartment } from './orgHelpers';
 
 function getGreeting(name) {
   const hour = new Date().getHours();
@@ -291,6 +293,120 @@ export default function CompanyDashboardView({
     return todos.filter(t => !t.done).slice(0, 5);
   }, [todos]);
 
+  // Team-Based Performance Breakdown (Dynamic Graph for All Teams & In-Scope Employees)
+  const [selectedPerfTeamId, setSelectedPerfTeamId] = useState('all');
+  const [perfTimeframe, setPerfTimeframe] = useState('today'); // 'today' | '7days' | 'month'
+
+  const inScopePerfEmployees = useMemo(() => {
+    return getPerformanceVisibleEmployees(currentUser, employees);
+  }, [currentUser, employees]);
+
+  // Determine timeframe boundary
+  const perfStartDate = useMemo(() => {
+    if (perfTimeframe === 'today') return todayStr;
+    if (perfTimeframe === '7days') return getDateOffset(-7);
+    return getDateOffset(-30);
+  }, [perfTimeframe, todayStr]);
+
+  // Pre-calculate per-employee metrics across the timeframe
+  const empPerfMap = useMemo(() => {
+    const map = new Map();
+    const timeframeTasks = tasks.filter(t => {
+      const taskDate = (t.taskDate || t.date || t.deadlineDate || t.createdAt || '').slice(0, 10);
+      if (!taskDate) return true;
+      return taskDate >= perfStartDate && taskDate <= todayStr;
+    });
+
+    inScopePerfEmployees.forEach(emp => {
+      const eId = String(emp.id || emp.uid || emp.employeeId);
+      const empTasks = timeframeTasks.filter(t => String(t.assignedToId || t.assignedTo) === eId);
+      const total = empTasks.length;
+      const done = empTasks.filter(t => t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed').length;
+      const ovd = empTasks.filter(t => {
+        const isDone = t.status === TASK_STATUSES.COMPLETED || t.status === 'Completed';
+        const taskDeadline = (t.deadlineDate || '').slice(0, 10);
+        return !isDone && (taskDeadline && taskDeadline < todayStr);
+      }).length;
+      const rate = total > 0 ? Math.round((done / total) * 100) : 0;
+
+      map.set(eId, {
+        total,
+        done,
+        ovd,
+        rate,
+        pending: total - done
+      });
+    });
+
+    return map;
+  }, [inScopePerfEmployees, tasks, perfStartDate, todayStr]);
+
+  // Aggregate by Team
+  const teamPerformanceData = useMemo(() => {
+    const inScopeEmpIdSet = new Set(inScopePerfEmployees.map(e => String(e.id || e.uid || e.employeeId)));
+
+    // Active teams that have in-scope members or leaders
+    const validTeams = teams.filter(t => {
+      if (t.status === 'inactive') return false;
+      const mIds = (t.members || []).map(m => String(m.id || m.userId || m.employeeId));
+      const hasMember = mIds.some(id => inScopeEmpIdSet.has(id));
+      const hasLeader = inScopeEmpIdSet.has(String(t.leaderId));
+      return hasMember || hasLeader;
+    });
+
+    const list = validTeams.map(t => {
+      const mIds = (t.members || []).map(m => String(m.id || m.userId || m.employeeId));
+      // Include leader as well
+      const allTeamIds = Array.from(new Set([...mIds, String(t.leaderId)].filter(Boolean)));
+      
+      const inScopeTeamMembers = allTeamIds
+        .filter(id => inScopeEmpIdSet.has(id))
+        .map(id => {
+          const emp = inScopePerfEmployees.find(e => String(e.id || e.uid || e.employeeId) === id);
+          const stats = empPerfMap.get(id) || { total: 0, done: 0, ovd: 0, rate: 0, pending: 0 };
+          return {
+            id,
+            name: formatName(emp?.fullName || emp?.name || 'Member'),
+            role: emp?.designation || emp?.role || 'Staff',
+            isLeader: String(t.leaderId) === id,
+            ...stats
+          };
+        });
+
+      let teamTotal = 0;
+      let teamDone = 0;
+      let teamOvd = 0;
+
+      inScopeTeamMembers.forEach(m => {
+        teamTotal += m.total;
+        teamDone += m.done;
+        teamOvd += m.ovd;
+      });
+
+      const teamRate = teamTotal > 0 ? Math.round((teamDone / teamTotal) * 100) : 0;
+
+      return {
+        id: t.id,
+        name: formatName(t.name),
+        department: formatDepartment(t.departmentId || t.department),
+        leaderName: formatName(t.leaderName || 'Team Leader'),
+        members: inScopeTeamMembers,
+        total: teamTotal,
+        done: teamDone,
+        ovd: teamOvd,
+        rate: teamRate
+      };
+    });
+
+    return list;
+  }, [teams, inScopePerfEmployees, empPerfMap]);
+
+  // Determine teams to show (or all)
+  const activeDisplayedTeams = useMemo(() => {
+    if (selectedPerfTeamId === 'all') return teamPerformanceData;
+    return teamPerformanceData.filter(t => t.id === selectedPerfTeamId);
+  }, [selectedPerfTeamId, teamPerformanceData]);
+
   return (
     <div className="space-y-6">
       
@@ -385,6 +501,165 @@ export default function CompanyDashboardView({
         </div>
 
       </div>
+
+      {/* 2.5 TEAM-BASED EMPLOYEE PERFORMANCE GRAPH & BENCHMARK */}
+      {teamPerformanceData.length > 0 && (
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 text-[#05331F] flex items-center justify-center font-bold">
+                  <BarChart2 className="w-4 h-4 text-emerald-700" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
+                    Team Squads Performance & Employee Breakdown
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Live execution graph of employees grouped by their assigned squads
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter controls: Squad Selector & Timeframe */}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={selectedPerfTeamId}
+                onChange={(e) => setSelectedPerfTeamId(e.target.value)}
+                className="h-9 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none focus:border-[#05331F] cursor-pointer"
+              >
+                <option value="all">All Teams ({teamPerformanceData.length})</option>
+                {teamPerformanceData.map(t => (
+                  <option key={t.id} value={t.id}>{t.name} ({t.department})</option>
+                ))}
+              </select>
+
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs">
+                {[
+                  { id: 'today', label: 'Today' },
+                  { id: '7days', label: '7 Days' },
+                  { id: 'month', label: '30 Days' }
+                ].map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => setPerfTimeframe(p.id)}
+                    className={`px-2.5 py-1 rounded-lg font-medium transition cursor-pointer ${
+                      perfTimeframe === p.id 
+                        ? 'bg-[#05331F] text-white shadow-2xs' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Teams Grid of Graphs */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            {activeDisplayedTeams.map(team => (
+              <div 
+                key={team.id}
+                className="p-4 rounded-2xl border border-slate-200/90 bg-slate-50/50 space-y-4 hover:border-emerald-300 transition"
+              >
+                {/* Team Header & Overall Progress */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-slate-900 text-sm">{team.name}</h3>
+                      <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full font-medium">
+                        {team.department}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Leader: <span className="font-semibold text-slate-700">{team.leaderName}</span> • {team.members.length} members
+                    </p>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-sm font-extrabold text-[#05331F]">{team.rate}%</span>
+                    <p className="text-[10px] text-slate-400">{team.done} of {team.total} done</p>
+                  </div>
+                </div>
+
+                {/* Team Overall Bar */}
+                <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-[#05331F] h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${team.rate}%` }}
+                  />
+                </div>
+
+                {/* Per-Employee Graph Bars */}
+                <div className="space-y-2.5 pt-1">
+                  {team.members.length === 0 ? (
+                    <div className="text-center py-4 text-slate-400 text-xs">
+                      No members assigned to this squad yet.
+                    </div>
+                  ) : (
+                    team.members.map(member => (
+                      <div key={member.id} className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-bold text-slate-800 truncate">{member.name}</span>
+                            {member.isLeader && (
+                              <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-semibold shrink-0">
+                                Lead
+                              </span>
+                            )}
+                            <span className="text-[11px] text-slate-400 truncate">({member.role})</span>
+                          </div>
+
+                          <div className="flex items-center gap-3 shrink-0 text-[11px]">
+                            {member.ovd > 0 && (
+                              <span className="text-rose-600 font-semibold bg-rose-50 px-1.5 py-0.2 rounded">
+                                {member.ovd} overdue
+                              </span>
+                            )}
+                            <span className="text-slate-600 font-medium">
+                              {member.done}/{member.total}
+                            </span>
+                            <span className="font-bold text-[#05331F] min-w-[32px] text-right">
+                              {member.rate}%
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Dual-color performance bar: Completed (Emerald) + In-progress (Amber) + Overdue (Rose) */}
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden flex">
+                          {member.total > 0 ? (
+                            <>
+                              <div 
+                                className="bg-emerald-600 h-full transition-all duration-300"
+                                style={{ width: `${(member.done / member.total) * 100}%` }}
+                                title={`Completed: ${member.done}`}
+                              />
+                              <div 
+                                className="bg-amber-400 h-full transition-all duration-300"
+                                style={{ width: `${(Math.max(0, member.total - member.done - member.ovd) / member.total) * 100}%` }}
+                                title={`In Progress: ${Math.max(0, member.total - member.done - member.ovd)}`}
+                              />
+                              <div 
+                                className="bg-rose-500 h-full transition-all duration-300"
+                                style={{ width: `${(member.ovd / member.total) * 100}%` }}
+                                title={`Overdue: ${member.ovd}`}
+                              />
+                            </>
+                          ) : (
+                            <div className="bg-slate-200 h-full w-full" title="No tasks logged" />
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 3. FINANCE PAYMENT VERIFICATION LIST (Pending verifications sorted by required-by date, age, holds on top) */}
       {isFinanceRole && (
