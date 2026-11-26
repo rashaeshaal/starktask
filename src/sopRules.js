@@ -5,10 +5,8 @@
 
 export const SOP_CONSTANTS = {
   COMPANY_NAME: 'STARK STEEL DOORS',
-  VERSION: '2.0 – Final Operational Revision',
+  VERSION: '2.0 – Operational Revision',
   DAILY_LOADING_TARGET: 70, // 70 doors by 6:00 PM
-  ORDER_RECEIVING_CUTOFF: '11:00 AM',
-  FINAL_HANDOVER_DEADLINE: '12:15 PM',
   FINAL_QC_DEADLINE: '04:30 PM',
   FINAL_LOADING_DEADLINE: '06:00 PM'
 };
@@ -23,12 +21,11 @@ export const LOADING_MILESTONES = [
 
 // Daily Operational Handover Schedule
 export const SOP_DAILY_SCHEDULE = [
-  { time: 'Before 10:30 AM', activity: 'Dealer order collection & preliminary verification', owner: 'Sales Coordinators', dept: 'sales' },
-  { time: '11:00 AM', activity: 'FINAL ORDER CUTOFF (After 11 AM requires GM exception)', owner: 'CSO / Sales Team', dept: 'sales', critical: true },
-  { time: '11:00 – 11:30 AM', activity: 'Sales Verification & Completeness Check', owner: 'ASM / SSM / CSO', dept: 'sales' },
-  { time: '11:30 AM – 12:00 PM', activity: 'Payment Verification & Accounts Clearance', owner: 'Accounts Manager / Accountants', dept: 'finance', critical: true },
-  { time: '12:00 – 12:15 PM', activity: 'Final Operations Handover & Allocation', owner: 'CSO & Operations Head', dept: 'operations' },
-  { time: '12:15 – 1:00 PM', activity: 'Stock verification & loading plan preparation', owner: 'Warehouse In-charge', dept: 'operations' },
+  { time: 'Morning', activity: 'Dealer order collection & preliminary verification', owner: 'Sales Coordinators', dept: 'sales' },
+  { time: 'Continuous', activity: 'Sales Verification & Completeness Check', owner: 'ASM / SSM / CSO', dept: 'sales' },
+  { time: 'Accounts Hours', activity: 'Payment Verification & Accounts Clearance', owner: 'Accounts Manager / Accountants', dept: 'finance', critical: true },
+  { time: 'Midday', activity: 'Operations Handover & Allocation', owner: 'CSO & Operations Head', dept: 'operations' },
+  { time: 'Early Afternoon', activity: 'Stock verification & loading plan preparation', owner: 'Warehouse In-charge', dept: 'operations' },
   { time: '1:00 – 3:30 PM', activity: 'Picking and order staging / preparation', owner: 'Warehouse Supervisor', dept: 'operations' },
   { time: '3:30 – 4:30 PM', activity: 'FINAL MANDATORY QC INSPECTION & CLEARANCE', owner: 'QC Inspector / QC Executive', dept: 'operations', critical: true },
   { time: '4:30 – 5:45 PM', activity: 'Loading of QC-approved doors into vehicles', owner: 'Loading Staff / Warehouse Sup', dept: 'operations' },
@@ -67,7 +64,6 @@ export const MANDATORY_QC_CHECKLIST = [
 // Escalation Matrix (Section 15 of SOP)
 export const ESCALATION_MATRIX = [
   { issue: 'Incorrect address / Missing PIN code', owner: 'Sales Coordinator', escalation: 'ASM → CSO' },
-  { issue: 'Late order submission (post 11:00 AM)', owner: 'CSO', escalation: 'General Manager' },
   { issue: 'Payment pending / Payment Hold', owner: 'Accounts Manager', escalation: 'General Manager' },
   { issue: 'Stock shortage detected', owner: 'Warehouse In-charge', escalation: 'Operations Head' },
   { issue: 'QC Rejection / Defect detected', owner: 'QC Inspector', escalation: 'Operations Head' },

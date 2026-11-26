@@ -5,8 +5,9 @@ import {
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, storage } from './firebase';
 import { MASTER_DEPARTMENTS, MASTER_DESIGNATIONS } from './orgStructure';
-import { getTodayDateString } from './dateUtils';
+import { getTodayDateString, isDailyWorkLogLocked } from './dateUtils';
 import { STARK_DEALER_DIRECTORY } from './dealerDirectory';
+import { ENTERPRISE_EMPLOYEE_DIRECTORY } from './employeeDirectory';
 
 import { getScope, getVisibleUserIds, SCOPES } from './permissions';
 
@@ -28,6 +29,7 @@ export const RECURRING_COL = 'recurringTasks';
 export const ORG_SETTINGS_COL = 'organizationSettings';
 export const DEALERS_COL = 'dealers';
 export const DEALER_BOOKINGS_COL = 'dealerBookings';
+export const DOOR_CATALOG_COL = 'doorCatalog';
 
 /**
  * Audit log write helper for sensitive operations:
@@ -86,8 +88,6 @@ export async function initializeCompanyStructure() {
         systemName: 'SalesDoor Enterprise',
         sopVersion: '2.0',
         timezone: 'Asia/Kolkata',
-        dailyCutoffTime: '23:59:59',
-        orderCutoffTime: '11:00 AM',
         dailyTargetDoors: 70,
         createdAt: serverTimestamp()
       });
@@ -122,7 +122,7 @@ export async function initializeCompanyStructure() {
 }
 
 /**
- * 0. Subscribe to Organization Settings (e.g. org.rootEmployeeId)
+ * 0. Subscribe to Organization Settings (e.g. org.rootEmployeeId, routing assignees)
  */
 export function subscribeToOrgSettings(callback) {
   const docRef = doc(db, ORG_SETTINGS_COL, 'general');
@@ -133,6 +133,19 @@ export function subscribeToOrgSettings(callback) {
       callback({});
     }
   }, (err) => console.error('Org settings sync error:', err));
+}
+
+/**
+ * Update Organization Settings
+ */
+export async function updateOrgSettings(settingsData, user = null) {
+  const docRef = doc(db, ORG_SETTINGS_COL, 'general');
+  await setDoc(docRef, {
+    ...settingsData,
+    lastUpdated: new Date().toISOString(),
+    updatedById: user?.id || user?.uid || 'system',
+    updatedByName: user?.fullName || user?.name || 'Administrator'
+  }, { merge: true });
 }
 
 /**
@@ -375,6 +388,20 @@ export function subscribeToTasks(currentUser, callback, allEmployees = []) {
     );
   }
 
+  // 4a-2. Also query assignedDriverId / driverId for drivers
+  for (let i = 0; i < selfIds.length; i += 30) {
+    const chunk = selfIds.slice(i, i + 30);
+    const qDriverAssigned = query(collection(db, TASKS_COL), where('assignedDriverId', 'in', chunk));
+    listeners.push(
+      onSnapshot(qDriverAssigned, (snap) => {
+        snap.forEach(d => selfMap.set(d.id, { id: d.id, ...d.data() }));
+        emitSelfTasks();
+      }, (err) => {
+        console.warn('assignedDriverId query error:', err);
+      })
+    );
+  }
+
   // 4b. Assigned to me via assigneeIds array
   for (let i = 0; i < selfIds.length; i += 10) {
     const chunk = selfIds.slice(i, i + 10);
@@ -430,6 +457,31 @@ export function subscribeToNotifications(userId, callback) {
 }
 
 /**
+ * Creates an in-app notification for a designated employee or role
+ */
+export async function createNotification({ recipientId, title, message, type = 'info', linkTab = null, linkId = null }) {
+  if (!recipientId) return null;
+  try {
+    const payload = {
+      recipientId: String(recipientId),
+      title: String(title || 'Workflow Update'),
+      message: String(message || ''),
+      type,
+      linkTab: linkTab || null,
+      linkId: linkId || null,
+      read: false,
+      createdAt: serverTimestamp(),
+      timestamp: new Date().toISOString()
+    };
+    const refDoc = await addDoc(collection(db, NOTIFS_COL), payload);
+    return refDoc.id;
+  } catch (err) {
+    console.warn('createNotification warning (non-fatal):', err.message);
+    return null;
+  }
+}
+
+/**
  * 8. Subscribe to Dealers (Live Firestore with automatic fallback)
  */
 export function subscribeToDealers(callback) {
@@ -478,6 +530,18 @@ export function subscribeToDealerBookings(callback) {
  */
 export async function createFirestoreTask(taskData, creator) {
   const todayStr = getTodayDateString();
+  const effectiveDate = taskData.taskDate || taskData.date || todayStr;
+
+  // Strict daily work log enforcement: only current business date allowed
+  if (taskData.isWorkLog || taskData.selfLogged) {
+    if (effectiveDate !== todayStr) {
+      throw new Error(`Daily work logs can only be created for the current business date (${todayStr}). Past and future dates are strictly rejected.`);
+    }
+    if (isDailyWorkLogLocked(effectiveDate)) {
+      throw new Error("Today's work log is locked. Entries can no longer be modified.");
+    }
+  }
+
   const timestamp = new Date().toISOString();
 
   const taskPayload = {
@@ -490,7 +554,7 @@ export async function createFirestoreTask(taskData, creator) {
     assignedByRole: taskData.assignedByRole || creator.role,
     createdAt: timestamp,
     lastUpdated: timestamp,
-    taskDate: taskData.taskDate || todayStr,
+    taskDate: effectiveDate,
     status: taskData.status || 'Pending',
     progressPercentage: taskData.progressPercentage || 0,
     parentTaskId: taskData.parentTaskId || null,
@@ -498,7 +562,7 @@ export async function createFirestoreTask(taskData, creator) {
     auditLogs: [
       {
         id: `log-${Date.now()}`,
-        action: 'TASK_CREATED',
+        action: taskData.isWorkLog || taskData.selfLogged ? 'SELF_WORK_LOGGED' : 'TASK_CREATED',
         performedById: creator.id || creator.uid,
         performedByName: `${creator.fullName || creator.name} (${creator.role})`,
         timestamp,
@@ -525,6 +589,12 @@ export async function updateFirestoreTask(taskId, updateData, user) {
   const existingSnap = await getDoc(taskRef);
   const existingData = existingSnap.exists() ? existingSnap.data() : {};
 
+  // Check 11:59 PM daily lock on existing task date
+  const targetDate = existingData.taskDate || existingData.date || existingData.deadlineDate || updateData.taskDate || updateData.date;
+  if (isDailyWorkLogLocked(targetDate)) {
+    throw new Error("Today's work log is locked. Entries can no longer be modified.");
+  }
+
   const auditLog = {
     id: `log-${Date.now()}`,
     action: updateData.status ? `STATUS_UPDATED_${updateData.status.toUpperCase()}` : 'TASK_UPDATED',
@@ -536,11 +606,24 @@ export async function updateFirestoreTask(taskId, updateData, user) {
 
   const mergedLogs = [auditLog, ...(existingData.auditLogs || [])];
 
-  await updateDoc(taskRef, {
-    ...updateData,
-    lastUpdated: timestamp,
-    auditLogs: mergedLogs
-  });
+  if (!existingSnap.exists()) {
+    // If updating a virtual/synthetic task or a task that doesn't exist in Firestore yet, write with setDoc
+    await setDoc(taskRef, {
+      ...updateData,
+      createdById: user.id || user.uid,
+      createdByName: user.fullName || user.name,
+      createdByRole: user.role,
+      createdAt: timestamp,
+      lastUpdated: timestamp,
+      auditLogs: mergedLogs
+    });
+  } else {
+    await updateDoc(taskRef, {
+      ...updateData,
+      lastUpdated: timestamp,
+      auditLogs: mergedLogs
+    });
+  }
 
   // Roll up progress to parent task if this was a subtask
   const parentId = updateData.parentTaskId || existingData.parentTaskId;
@@ -573,6 +656,148 @@ export async function updateFirestoreTask(taskId, updateData, user) {
       console.warn('Subtask progress rollup warning:', rollupErr);
     }
   }
+
+  // Sync payment verification status back to dealer booking if linked
+  const targetBookingId = updateData.sourceBookingId || existingData.sourceBookingId || updateData.bookingId || existingData.bookingId;
+  const isPayTask = (existingData.taskType === 'Payment verification' || updateData.taskType === 'Payment verification' ||
+                    (existingData.title && existingData.title.toLowerCase().includes('payment')) ||
+                    (updateData.title && updateData.title.toLowerCase().includes('payment')));
+
+  const isWarehouseTaskItem = (existingData.department === 'warehouse' || updateData.department === 'warehouse' ||
+                              existingData.departmentId === 'warehouse' || updateData.departmentId === 'warehouse' ||
+                              (existingData.title && existingData.title.toLowerCase().includes('warehouse picking')));
+
+  const isTransportTaskItem = (existingData.department === 'transportation' || updateData.department === 'transportation' ||
+                              existingData.departmentId === 'transportation' || updateData.departmentId === 'transportation' ||
+                              (existingData.title && existingData.title.toLowerCase().includes('dispatch route')));
+
+  if (targetBookingId) {
+    try {
+      const bRef = doc(db, DEALER_BOOKINGS_COL, targetBookingId);
+      const bSnap = await getDoc(bRef);
+      if (bSnap.exists()) {
+        const bData = bSnap.data();
+        let newBookingStatus = null;
+        let noteText = '';
+
+        if (isPayTask) {
+          if (updateData.paymentStatus === 'Cleared' || updateData.accountsClearance === 'Cleared') {
+            newBookingStatus = 'Accounts Cleared';
+            noteText = 'Advance payment verified and cleared by Accounts.';
+          } else if (updateData.paymentStatus === 'Payment Hold' || updateData.accountsClearance === 'Payment Hold') {
+            newBookingStatus = 'Payment Hold';
+            noteText = updateData.holdReason ? `Payment placed on hold: ${updateData.holdReason}` : 'Payment placed on hold by Accounts.';
+          }
+        } else if (isWarehouseTaskItem && (updateData.status === 'Completed' || existingData.status === 'Completed')) {
+          if (bData.status === 'Accounts Cleared' || bData.status === 'Booked') {
+            newBookingStatus = 'Picked';
+            noteText = 'Warehouse door picking and packing completed & signed off.';
+          }
+        } else if (isTransportTaskItem) {
+          if (updateData.status === 'Completed' || existingData.status === 'Completed') {
+            newBookingStatus = 'Delivered';
+            noteText = 'Dealer delivery completed with signed POD.';
+          } else if (updateData.status === 'Pending Review' || updateData.status === 'Waiting for Sign-Off' || updateData.approvalStatus === 'pending' || updateData.isDeliveryCompleted) {
+            newBookingStatus = 'Delivered'; // Advance to Delivered once driver submits POD for sign-off
+            noteText = 'Driver delivered doors to dealer and submitted signed POD for coordinator review.';
+          } else if (updateData.isDispatched || updateData.departureTime || updateData.status === 'In Progress') {
+            if (bData.status !== 'Delivered') {
+              newBookingStatus = 'Dispatched';
+              noteText = updateData.driverName 
+                ? `Assigned to driver ${updateData.driverName} (${updateData.vehicleNumber || 'Vehicle'}). Dispatched for dealer delivery.`
+                : 'Vehicle departed for dealer showroom delivery.';
+            }
+          }
+        }
+
+        const linkedTaskIds = Array.from(new Set([...(bData.linkedTaskIds || []), taskId]));
+
+        const bookingUpdates = {
+          linkedTaskIds,
+          ...(newBookingStatus && newBookingStatus !== bData.status ? { status: newBookingStatus } : {}),
+          ...(updateData.accountsClearance || updateData.paymentStatus ? {
+            accountsClearance: updateData.accountsClearance || updateData.paymentStatus,
+            paymentStatus: updateData.paymentStatus,
+            holdReason: updateData.holdReason || null
+          } : {}),
+          ...(updateData.assignedDriverId || updateData.driverId ? {
+            assignedDriverId: updateData.assignedDriverId || updateData.driverId,
+            driverName: updateData.driverName || bData.driverName,
+            driverId: updateData.driverId || updateData.assignedDriverId,
+            vehicleNumber: updateData.vehicleNumber || bData.vehicleNumber,
+            dispatchDate: updateData.customDispatchDate || updateData.pickupDate || bData.dispatchDate,
+            departureWindow: updateData.departureWindow || bData.departureWindow,
+            region: updateData.region || updateData.deliveryRegion || bData.region
+          } : {}),
+          ...(newBookingStatus === 'Delivered' ? { deliveredAt: timestamp, deliveryProofPhotos: updateData.photos || [] } : {}),
+          lastUpdated: timestamp
+        };
+
+        if (newBookingStatus && newBookingStatus !== bData.status) {
+          const updatedHistory = [
+            ...(bData.statusHistory || []),
+            {
+              status: newBookingStatus,
+              performedBy: user.fullName || user.name,
+              performedByRole: user.role,
+              timestamp,
+              notes: noteText
+            }
+          ];
+          bookingUpdates.statusHistory = updatedHistory;
+        }
+
+        await updateDoc(bRef, bookingUpdates);
+      }
+    } catch (bookingSyncErr) {
+      console.warn('Booking sync warning from task update:', bookingSyncErr);
+    }
+  }
+}
+
+/**
+ * Deletes a task from Firestore with strict 11:59 PM daily lock validation and audit logging
+ */
+export async function deleteFirestoreTask(taskId, user) {
+  if (!taskId) throw new Error('Task ID is required for deletion');
+
+  const taskRef = doc(db, TASKS_COL, taskId);
+  const existingSnap = await getDoc(taskRef);
+
+  if (!existingSnap.exists()) {
+    return; // Already deleted or doesn't exist
+  }
+
+  const existingData = existingSnap.data();
+  const targetDate = existingData.taskDate || existingData.date || existingData.deadlineDate;
+
+  // Strict 11:59 PM daily lock check
+  if (isDailyWorkLogLocked(targetDate)) {
+    throw new Error("Today's work log is locked. Entries can no longer be modified.");
+  }
+
+  const timestamp = new Date().toISOString();
+
+  // Record audit log before deletion to preserve audit history for permitted changes
+  try {
+    await addDoc(collection(db, AUDIT_COL), {
+      id: `task-del-${Date.now()}`,
+      action: 'TASK_DELETED',
+      taskId,
+      taskTitle: existingData.title || 'Untitled Task',
+      taskDate: targetDate,
+      assignedToId: existingData.assignedToId || null,
+      assignedToName: existingData.assignedToName || null,
+      deletedById: user?.id || user?.uid || 'Unknown',
+      deletedByName: `${user?.fullName || user?.name || 'User'} (${user?.role || ''})`,
+      timestamp,
+      createdAt: serverTimestamp()
+    });
+  } catch (auditErr) {
+    console.warn('Audit record before delete warning:', auditErr);
+  }
+
+  await deleteDoc(taskRef);
 }
 
 /**
@@ -624,15 +849,14 @@ export async function uploadTaskAttachment(file, taskId = 'general') {
  */
 export async function createDealerBookingWithChain(bookingData, user) {
   const timestamp = new Date().toISOString();
-  const now = new Date();
   const bookingDate = bookingData.bookingDate || getTodayDateString();
-
-  // 11:00 AM cutoff check: A booking saved after 11:00 AM gets a "Late order" flag
-  const isAfter11AM = now.getHours() > 11 || (now.getHours() === 11 && (now.getMinutes() > 0 || now.getSeconds() > 0));
 
   const totalQuantity = (bookingData.lines || []).reduce((sum, line) => sum + (parseInt(line.quantity, 10) || 1), 0);
 
-  const initialStatus = isAfter11AM ? 'Pending Approval' : 'Booked';
+  const nowHours = new Date().getHours();
+  const isAfter11AM = nowHours >= 11;
+
+  const initialStatus = 'Booked';
 
   const bookingPayload = {
     dealerId: bookingData.dealerId,
@@ -650,7 +874,6 @@ export async function createDealerBookingWithChain(bookingData, user) {
     deliveryAddress: bookingData.deliveryAddress || '',
     notes: bookingData.notes || '',
     paymentSlipUrl: bookingData.paymentSlipUrl || null,
-    late: isAfter11AM,
     status: initialStatus,
     statusHistory: [
       {
@@ -658,7 +881,7 @@ export async function createDealerBookingWithChain(bookingData, user) {
         performedBy: user.fullName || user.name,
         performedByRole: user.role,
         timestamp,
-        notes: isAfter11AM ? 'Booked after 11:00 AM cutoff. Sign-off requested from SSM/CSO.' : 'Initial booking logged.'
+        notes: 'Initial booking logged.'
       }
     ],
     linkedTaskIds: []
@@ -667,18 +890,97 @@ export async function createDealerBookingWithChain(bookingData, user) {
   const bookingRef = await addDoc(collection(db, DEALER_BOOKINGS_COL), bookingPayload);
   const bookingId = bookingRef.id;
 
+  // Retrieve dynamic assignee configuration or find active head dynamically from employees
+  let dynamicAccountsId = null;
+  let dynamicAccountsName = 'Accounts Manager';
+  let dynamicWarehouseId = null;
+  let dynamicWarehouseName = 'Warehouse In-charge';
+  let dynamicTransportId = null;
+  let dynamicTransportName = 'Transport Manager';
+
+  try {
+    const settingsSnap = await getDoc(doc(db, ORG_SETTINGS_COL, 'general'));
+    if (settingsSnap.exists()) {
+      const s = settingsSnap.data();
+      if (s.accountsAssigneeId) {
+        dynamicAccountsId = s.accountsAssigneeId;
+        dynamicAccountsName = s.accountsAssigneeName || 'Accounts Manager';
+      }
+      if (s.warehouseAssigneeId) {
+        dynamicWarehouseId = s.warehouseAssigneeId;
+        dynamicWarehouseName = s.warehouseAssigneeName || 'Warehouse In-charge';
+      }
+      if (s.transportAssigneeId) {
+        dynamicTransportId = s.transportAssigneeId;
+        dynamicTransportName = s.transportAssigneeName || 'Transport Manager';
+      }
+    }
+
+    // Dynamic resolution if not explicitly set in org settings
+    if (!dynamicAccountsId || !dynamicWarehouseId || !dynamicTransportId) {
+      const employeesSnap = await getDocs(collection(db, EMPLOYEES_COL));
+      let allEmps = employeesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (allEmps.length === 0) {
+        allEmps = ENTERPRISE_EMPLOYEE_DIRECTORY;
+      }
+
+      if (!dynamicAccountsId) {
+        const accLead = allEmps.find(e => {
+          const d = (e.department || e.departmentId || '').toLowerCase();
+          const r = (e.role || e.designation || '').toLowerCase();
+          return (d === 'finance' || d === 'accounts' || r.includes('accountant') || r.includes('accounts')) && (r.includes('manager') || r.includes('executive') || r.includes('accountant'));
+        });
+        if (accLead) {
+          dynamicAccountsId = accLead.id || accLead.uid || accLead.employeeId;
+          dynamicAccountsName = accLead.fullName || accLead.name || 'Accounts Manager';
+        }
+      }
+
+      if (!dynamicWarehouseId) {
+        const whLead = allEmps.find(e => {
+          const d = (e.department || e.departmentId || '').toLowerCase();
+          const r = (e.role || e.designation || '').toLowerCase();
+          return (d === 'warehouse' || r.includes('warehouse')) && (r.includes('charge') || r.includes('supervisor') || r.includes('manager') || r.includes('executive'));
+        });
+        if (whLead) {
+          dynamicWarehouseId = whLead.id || whLead.uid || whLead.employeeId;
+          dynamicWarehouseName = whLead.fullName || whLead.name || 'Warehouse In-charge';
+        }
+      }
+
+      if (!dynamicTransportId) {
+        const trLead = allEmps.find(e => {
+          const d = (e.department || e.departmentId || '').toLowerCase();
+          const r = (e.role || e.designation || '').toLowerCase();
+          return (d === 'transportation' || d === 'transport' || r.includes('transport')) && (r.includes('manager') || r.includes('coordinator'));
+        });
+        if (trLead) {
+          dynamicTransportId = trLead.id || trLead.uid || trLead.employeeId;
+          dynamicTransportName = trLead.fullName || trLead.name || 'Transport Manager';
+        }
+      }
+    }
+  } catch (confErr) {
+    console.info('Using default order chain configuration:', confErr.message);
+  }
+
   // Linked Task 1: Verify Payment Token (Finance Department)
   const task1Id = await createFirestoreTask({
     title: `Verify payment token - ${bookingData.dealerName}`,
     description: `Verify advance payment token/credit clearance for dealer booking #${bookingData.bookingCode || bookingId.slice(-6).toUpperCase()}. Salesperson: ${user.fullName || user.name}. Required-by date: ${bookingData.requiredBy}.`,
     taskType: 'Payment verification',
+    taskCategory: 'Payment verification',
     reference: bookingData.bookingCode || bookingId.slice(-6).toUpperCase(),
     partyName: bookingData.dealerName,
     department: 'finance',
     departmentId: 'finance',
-    assignedToName: 'Accounts Manager',
-    assignedToId: 'emp_106',
+    assignedTo: dynamicAccountsId,
+    assignedToId: dynamicAccountsId,
+    assigneeIds: dynamicAccountsId ? [dynamicAccountsId] : [],
+    assignedToName: dynamicAccountsName,
     priority: isAfter11AM ? 'High' : 'Medium',
+    taskDate: bookingDate,
+    date: bookingDate,
     deadlineDate: bookingData.requiredBy,
     requiredBy: bookingData.requiredBy,
     isLinkedSalesWork: true,
@@ -692,8 +994,7 @@ export async function createDealerBookingWithChain(bookingData, user) {
       type: 'image/jpeg',
       uploadedAt: timestamp
     }] : [],
-    paymentSlipUrl: bookingData.paymentSlipUrl || null,
-    taskCategory: 'stark_door_order'
+    paymentSlipUrl: bookingData.paymentSlipUrl || null
   }, user);
 
   // Linked Task 2: Warehouse Picking (Warehouse Squad)
@@ -702,9 +1003,13 @@ export async function createDealerBookingWithChain(bookingData, user) {
     description: `Pick & quality pack doors for required-by date: ${bookingData.requiredBy}. Lines: ${(bookingData.lines || []).map(l => `${l.quantity}x ${l.model} (${l.finish || ''})`).join(', ')}`,
     department: 'warehouse',
     departmentId: 'warehouse',
-    assignedToName: 'Warehouse In-charge',
-    assignedToId: 'emp_166',
+    assignedTo: dynamicWarehouseId,
+    assignedToId: dynamicWarehouseId,
+    assigneeIds: dynamicWarehouseId ? [dynamicWarehouseId] : [],
+    assignedToName: dynamicWarehouseName,
     priority: 'Medium',
+    taskDate: bookingDate,
+    date: bookingDate,
     deadlineDate: bookingData.requiredBy,
     requiredBy: bookingData.requiredBy,
     isLinkedSalesWork: true,
@@ -721,9 +1026,13 @@ export async function createDealerBookingWithChain(bookingData, user) {
     description: `Loading and dispatch delivery to ${bookingData.deliveryAddress} by required date: ${bookingData.requiredBy}.`,
     department: 'transportation',
     departmentId: 'transportation',
-    assignedToName: 'Transport Manager',
-    assignedToId: 'emp_176',
+    assignedTo: dynamicTransportId,
+    assignedToId: dynamicTransportId,
+    assigneeIds: dynamicTransportId ? [dynamicTransportId] : [],
+    assignedToName: dynamicTransportName,
     priority: 'Medium',
+    taskDate: bookingDate,
+    date: bookingDate,
     deadlineDate: bookingData.requiredBy,
     requiredBy: bookingData.requiredBy,
     isLinkedSalesWork: true,
@@ -738,6 +1047,18 @@ export async function createDealerBookingWithChain(bookingData, user) {
   await updateDoc(bookingRef, {
     linkedTaskIds: [task1Id, task2Id, task3Id]
   });
+
+  // Notify Accounts Assignee of new payment verification requirement
+  if (dynamicAccountsId) {
+    await createNotification({
+      recipientId: dynamicAccountsId,
+      title: 'New Payment Verification Required',
+      message: `New door booking for ${bookingData.dealerName} (${totalQuantity} doors) created by ${user.fullName || user.name}. Advance verification required.`,
+      type: 'warning',
+      linkTab: 'bookings',
+      linkId: bookingId
+    });
+  }
 
   return bookingId;
 }
@@ -950,4 +1271,55 @@ export async function saveDealerRecord(dealerData, user) {
     const ref = await addDoc(collection(db, DEALERS_COL), payload);
     return ref.id;
   }
+}
+
+/**
+ * --- DOOR CATALOG & MODELS MASTER DATA SERVICES ---
+ * Allows HR Manager, Director Operations, and Executive Director to add, edit, and toggle door models & variants.
+ */
+
+// Subscribe to door catalog (with real-time updates)
+export function subscribeToDoorCatalog(callback) {
+  const q = query(collection(db, DOOR_CATALOG_COL), orderBy('model', 'asc'));
+  return onSnapshot(q, (snapshot) => {
+    const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    callback(list);
+  }, (err) => {
+    console.warn('Door catalog sync fallback:', err);
+    callback([]);
+  });
+}
+
+// Save or create a door model
+export async function saveDoorModel(doorData, user) {
+  const timestamp = new Date().toISOString();
+  const modelCode = (doorData.model || '').trim().toUpperCase();
+  const docId = doorData.id || modelCode.replace(/\s+/g, '_');
+  const docRef = doc(db, DOOR_CATALOG_COL, docId);
+
+  const payload = {
+    model: modelCode,
+    category: doorData.category || 'Standard Series',
+    variants: Array.isArray(doorData.variants) ? doorData.variants : [],
+    status: doorData.status || 'Active',
+    description: doorData.description || '',
+    updatedAt: timestamp,
+    updatedById: user?.id || user?.uid || 'system',
+    updatedByName: user?.fullName || user?.name || 'Authorized Staff'
+  };
+
+  if (!doorData.id) {
+    payload.createdAt = timestamp;
+    payload.createdById = user?.id || user?.uid || 'system';
+    payload.createdByName = user?.fullName || user?.name || 'Authorized Staff';
+  }
+
+  await setDoc(docRef, payload, { merge: true });
+  return docId;
+}
+
+// Delete or toggle status of a door model
+export async function deleteDoorModel(modelId) {
+  const docRef = doc(db, DOOR_CATALOG_COL, modelId);
+  await deleteDoc(docRef);
 }

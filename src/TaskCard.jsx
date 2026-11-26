@@ -6,12 +6,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Check, MoreHorizontal, Edit3, Trash2, Copy, 
-  GitFork, UserPlus 
+  GitFork, UserPlus, Lock, Eye 
 } from 'lucide-react';
 import StatusPill from './StatusPill';
 import PriorityPill from './PriorityPill';
 import { formatName, formatDue, formatTime } from './taskHelpers';
 import { TASK_STATUSES } from './rbac';
+import { isDailyWorkLogLocked } from './dateUtils';
 
 export default function TaskCard({
   task,
@@ -41,6 +42,9 @@ export default function TaskCard({
   const assigneeName = formatName(task?.assignedToName || task?.assigneeName || 'Unassigned');
   const assignerName = formatName(task?.assignedByName || task?.createdByName);
   const isSelf = task?.selfLogged || (!task?.assignedByName && task?.createdById === currentUserId);
+
+  const taskDateVal = task?.taskDate || task?.date || task?.deadlineDate;
+  const isLocked = isDailyWorkLogLocked(taskDateVal);
 
   const updateMenuPosition = () => {
     if (!btnRef.current) return;
@@ -111,12 +115,17 @@ export default function TaskCard({
           {/* Custom Checkbox (touch target >= 40px) */}
           <button
             type="button"
+            disabled={isLocked}
             onClick={(e) => {
               e.stopPropagation();
+              if (isLocked) return;
               onToggleComplete && onToggleComplete(task, e);
             }}
-            aria-label={isCompleted ? "Mark task as incomplete" : "Mark task as completed"}
-            className="w-10 h-10 -ml-2 -mt-1 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-700 transition-colors flex-shrink-0 cursor-pointer"
+            aria-label={isLocked ? "Task is locked (past 11:59 PM)" : isCompleted ? "Mark task as incomplete" : "Mark task as completed"}
+            title={isLocked ? "Today's work log is locked. Entries can no longer be modified." : undefined}
+            className={`w-10 h-10 -ml-2 -mt-1 rounded-lg flex items-center justify-center text-slate-400 transition-colors flex-shrink-0 ${
+              isLocked ? 'cursor-not-allowed opacity-60' : 'hover:text-emerald-700 cursor-pointer'
+            }`}
           >
             {isCompleted ? (
               <div className="w-5 h-5 rounded-md bg-emerald-600 flex items-center justify-center text-white shadow-2xs">
@@ -128,11 +137,19 @@ export default function TaskCard({
           </button>
 
           <div className="min-w-0 flex-1 pt-0.5">
-            <h4 className={`text-sm font-semibold leading-snug ${
-              isCompleted ? 'line-through text-slate-400' : 'text-slate-900'
-            }`}>
-              {task?.title || 'Untitled Task'}
-            </h4>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h4 className={`text-sm font-semibold leading-snug ${
+                isCompleted ? 'line-through text-slate-400' : 'text-slate-900'
+              }`}>
+                {task?.title || 'Untitled Task'}
+              </h4>
+              {isLocked && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200 shrink-0" title="Today's work log is locked. Entries can no longer be modified.">
+                  <Lock className="w-2.5 h-2.5 text-slate-500" />
+                  Locked
+                </span>
+              )}
+            </div>
             {task?.description && (
               <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">
                 {task.description}
@@ -215,67 +232,90 @@ export default function TaskCard({
               className="bg-white border border-slate-200 rounded-xl shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100"
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                type="button"
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setIsMenuOpen(false); 
-                  onOpenDetails && onOpenDetails(task); 
-                }}
-                className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-              >
-                <Edit3 className="w-3.5 h-3.5 text-slate-400" />
-                <span>View & Edit</span>
-              </button>
-              <button
-                type="button"
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setIsMenuOpen(false); 
-                  onSplitTask && onSplitTask(task); 
-                }}
-                className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-              >
-                <GitFork className="w-3.5 h-3.5 text-slate-400" />
-                <span>Split into Subtask</span>
-              </button>
-              <button
-                type="button"
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setIsMenuOpen(false); 
-                  onReassignTask && onReassignTask(task); 
-                }}
-                className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-              >
-                <UserPlus className="w-3.5 h-3.5 text-slate-400" />
-                <span>Reassign</span>
-              </button>
-              <button
-                type="button"
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setIsMenuOpen(false); 
-                  onDuplicateTask && onDuplicateTask(task); 
-                }}
-                className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5 text-slate-400" />
-                <span>Duplicate</span>
-              </button>
-              <div className="h-px bg-slate-100 my-1" />
-              <button
-                type="button"
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  setIsMenuOpen(false); 
-                  onDeleteTask && onDeleteTask(task); 
-                }}
-                className="w-full px-3 py-2 text-left text-xs text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete Task</span>
-              </button>
+              {isLocked ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setIsMenuOpen(false); 
+                      onOpenDetails && onOpenDetails(task); 
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-slate-400" />
+                    <span>View Details (Read-only)</span>
+                  </button>
+                  <div className="px-3 py-1.5 text-[11px] text-slate-400 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5">
+                    <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                    <span>Locked at 11:59 PM</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setIsMenuOpen(false); 
+                      onOpenDetails && onOpenDetails(task); 
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-slate-400" />
+                    <span>View & Edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setIsMenuOpen(false); 
+                      onSplitTask && onSplitTask(task); 
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                  >
+                    <GitFork className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Split into Subtask</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setIsMenuOpen(false); 
+                      onReassignTask && onReassignTask(task); 
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                  >
+                    <UserPlus className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Reassign</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setIsMenuOpen(false); 
+                      onDuplicateTask && onDuplicateTask(task); 
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Duplicate</span>
+                  </button>
+                  <div className="h-px bg-slate-100 my-1" />
+                  <button
+                    type="button"
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setIsMenuOpen(false); 
+                      onDeleteTask && onDeleteTask(task); 
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Task</span>
+                  </button>
+                </>
+              )}
             </div>,
             document.body
           )}

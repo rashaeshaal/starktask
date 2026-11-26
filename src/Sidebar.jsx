@@ -1,21 +1,23 @@
-import React, { useState, useMemo } from 'react';
+import React from 'react';
 import { 
-  Building2, BarChart3, Inbox, CheckCheck, PlusCircle, 
-  Users, Layers, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
-  Settings, LogOut, ChevronLeft, ChevronRight, X, Shield, 
-  Calendar, RefreshCw, UserCheck, CheckSquare, Briefcase,
-  TrendingUp, Award, FileText, Check, Package, BookOpen, Send, Bell
+  LayoutDashboard, BarChart3, ClipboardCheck, ListChecks, FileCheck, 
+  ShieldAlert, CalendarCheck, Users, ContactRound, ChartColumn,
+  ChevronLeft, ChevronRight, X, LogOut, Package, Briefcase, Plus
 } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { getScope, canAccess, SCOPES, PAGES } from './permissions';
 import { canAccessSales } from './salesPermissions';
 
 /**
- * Systematic Left Navigation Sidebar for STARK STEEL DOORS (SalesDoor Enterprise)
- * Enforces central permissions and roles cleanly.
- * 
- * Desktop: In-flow fixed width column (w-72 or w-80, collapsed w-20) with smooth transition.
- * Mobile: Slide-over drawer with backdrop.
+ * Premium Deep Forest Green Sidebar for STARK STEEL Task Management System
+ * - Background: #05331F
+ * - Hover: #0A422B
+ * - Active navigation background: #174D37
+ * - Active indicator: #34D399
+ * - Primary text: #FFFFFF
+ * - Secondary text: #C1D5C9
+ * - Icons: #D0E2D7
+ * - Dividers: #35614B
  */
 export default function Sidebar({ 
   currentUser, 
@@ -29,6 +31,7 @@ export default function Sidebar({
   dueRemindersCount = 0,
   systemAlerts = [],
   onNavigateToTab,
+  onOpenAssignModal,
   isMobileOpen,
   onCloseMobile,
   isCollapsed = false,
@@ -44,7 +47,6 @@ export default function Sidebar({
   const canSeeTeamPerf = canAccess(currentUser, PAGES.TEAM_PERFORMANCE);
   const canSeeAllTasks = canAccess(currentUser, PAGES.ALL_TASKS);
   const canSeeMyTasks = canAccess(currentUser, PAGES.MY_TASKS);
-  const canSeeAssignedTasks = canAccess(currentUser, PAGES.ASSIGNED_TASKS);
   const canSeeApprovals = canAccess(currentUser, PAGES.APPROVALS);
   const canSeeEscalations = canAccess(currentUser, PAGES.ESCALATIONS);
   const canSeeTodos = canAccess(currentUser, PAGES.TODOS);
@@ -53,12 +55,9 @@ export default function Sidebar({
   const canSeeDealers = canAccess(currentUser, PAGES.DEALERS);
   const canSeeBookings = canAccess(currentUser, PAGES.BOOKINGS);
   const canSeeReports = canAccess(currentUser, PAGES.REPORTS);
-  const canSeeSettings = canAccess(currentUser, PAGES.SETTINGS);
-
-  const [isAlertsOpen, setIsAlertsOpen] = useState(false);
 
   const getInitials = (name) => {
-    if (!name) return 'EM';
+    if (!name) return 'SS';
     const parts = name.trim().split(' ');
     if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
     return name.slice(0, 2).toUpperCase();
@@ -72,81 +71,112 @@ export default function Sidebar({
     if (onCloseMobile) onCloseMobile();
   };
 
+  // Nav Item Styling with Deep Forest Green Theme:
+  // Default: transparent bg, #C1D5C9 text, #D0E2D7 icons
+  // Hover: #0A422B bg, #FFFFFF text
+  // Active: #174D37 bg, #FFFFFF text, #34D399 left indicator & icon accent
+  const navItemClass = (isActive) => `
+    w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer group relative font-medium
+    ${isActive 
+      ? 'bg-[#174D37] text-white font-semibold shadow-2xs' 
+      : 'text-[#C1D5C9] hover:text-white hover:bg-[#0A422B]'
+    }
+  `;
+
+  const activePill = (isActive) => isActive ? (
+    <span className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#34D399] rounded-r-full shadow-[0_0_8px_#34D399]" />
+  ) : null;
+
   return (
     <>
       {/* Mobile Drawer Backdrop */}
       {isMobileOpen && (
         <div 
           onClick={onCloseMobile}
-          className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs lg:hidden"
         />
       )}
 
-      {/* Main Sidebar Aside */}
+      {/* Main Sidebar Aside (Dark Forest Green #05331F) */}
       <aside className={`
         fixed lg:sticky top-0 left-0 z-50 h-screen bg-[#05331F] text-white flex flex-col justify-between shrink-0
-        transition-all duration-300 ease-in-out border-r border-[#07472B]/60 shadow-xl
-        ${isCollapsed ? 'w-20' : 'w-64 lg:w-72'}
+        transition-all duration-200 ease-in-out border-r border-[#35614B] shadow-lg
+        ${isCollapsed ? 'w-16' : 'w-60 lg:w-64'}
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
         
-        {/* Top Header & Logo */}
-        <div className="shrink-0">
-          <div className="h-16 flex items-center justify-between px-4 border-b border-[#07472B]/70">
-            <div className="flex items-center gap-3 overflow-hidden">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#10B981] to-[#07472B] flex items-center justify-center font-black text-white shrink-0 shadow-xs text-sm">
-                SS
-              </div>
-              {!isCollapsed && (
-                <div className="truncate">
-                  <div className="text-xs font-bold text-white tracking-wider uppercase">STARK STEEL</div>
-                  <div className="text-[10px] text-emerald-300/80 tracking-tight font-medium">SalesDoor Enterprise</div>
-                </div>
-              )}
+        {/* 1. BRANDING SECTION */}
+        <div className="shrink-0 px-4 h-16 flex items-center justify-between border-b border-[#35614B]">
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            <div className="w-8 h-8 rounded-lg bg-[#174D37] border border-[#35614B] flex items-center justify-center font-bold text-white shrink-0 text-xs shadow-xs">
+              SS
             </div>
-
-            {/* Collapse toggle button on desktop */}
-            <button
-              onClick={onToggleCollapse}
-              className="hidden lg:flex p-1.5 rounded-lg text-emerald-200/60 hover:text-white hover:bg-[#07472B] transition"
-              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
-
-            {/* Close button on mobile */}
-            <button
-              onClick={onCloseMobile}
-              className="lg:hidden p-1.5 rounded-lg text-emerald-200/60 hover:text-white hover:bg-[#07472B]"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            {!isCollapsed && (
+              <div className="truncate">
+                <div className="text-xs font-bold text-white tracking-tight leading-tight">
+                  STARK STEEL
+                </div>
+                <div className="text-[9px] font-medium text-[#C1D5C9] uppercase tracking-wider">
+                  Task Management
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* Desktop Collapse Toggle */}
+          <button
+            onClick={onToggleCollapse}
+            className="hidden lg:flex p-1.5 rounded-md text-[#C1D5C9] hover:text-white hover:bg-[#0A422B] transition cursor-pointer"
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          </button>
+
+          {/* Mobile Drawer Close */}
+          <button
+            onClick={onCloseMobile}
+            className="lg:hidden p-1.5 rounded-md text-[#C1D5C9] hover:text-white hover:bg-[#0A422B] cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Scrollable Navigation Menu */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin scrollbar-thumb-emerald-900">
+        {/* Quick Assign Action Button */}
+        {onOpenAssignModal && (
+          <div className="px-3 pt-3 pb-1 shrink-0">
+            <button
+              onClick={onOpenAssignModal}
+              title={isCollapsed ? "Assign Task" : ""}
+              className={`w-full py-2 bg-[#174D37] hover:bg-[#1f6347] active:bg-[#0A422B] border border-[#35614B] text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 shadow-xs transition cursor-pointer ${
+                isCollapsed ? "px-0" : "px-3"
+              }`}
+            >
+              <Plus className="w-4 h-4 text-[#34D399] shrink-0" />
+              {!isCollapsed && <span>Assign Task</span>}
+            </button>
+          </div>
+        )}
+
+        {/* 2. NAVIGATION GROUPS (Independently Scrollable) */}
+        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-5 scrollbar-thin scrollbar-thumb-[#35614B] scrollbar-track-transparent">
           
           {/* GROUP 1: OVERVIEW */}
           {(canSeeDashboard || canSeeTeamPerf) && (
             <div>
               {!isCollapsed && (
-                <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
+                <p className="px-3 text-[10px] font-semibold text-[#C1D5C9]/70 uppercase tracking-wider mb-1.5">
                   Overview
                 </p>
               )}
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {canSeeDashboard && (
                   <button
                     onClick={() => handleNavClick('dashboard')}
                     title={isCollapsed ? 'Dashboard' : ''}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                      activeTab === 'dashboard'
-                        ? 'bg-[#0d4a2d] text-white shadow-xs'
-                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                    }`}
+                    className={navItemClass(activeTab === 'dashboard')}
                   >
-                    <Layers className="w-4 h-4 shrink-0 text-emerald-400" />
+                    {activePill(activeTab === 'dashboard')}
+                    <LayoutDashboard className={`w-4 h-4 shrink-0 ${activeTab === 'dashboard' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
                     {!isCollapsed && <span>Dashboard</span>}
                   </button>
                 )}
@@ -154,327 +184,237 @@ export default function Sidebar({
                 {canSeeTeamPerf && (
                   <button
                     onClick={() => handleNavClick('team_performance')}
-                    title={isCollapsed ? 'Team Performance' : ''}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                      activeTab === 'team_performance'
-                        ? 'bg-[#0d4a2d] text-white shadow-xs'
-                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                    }`}
+                    title={isCollapsed ? 'Performance' : ''}
+                    className={navItemClass(activeTab === 'team_performance')}
                   >
-                    <TrendingUp className="w-4 h-4 shrink-0 text-emerald-400" />
-                    {!isCollapsed && <span>Team Performance</span>}
+                    {activePill(activeTab === 'team_performance')}
+                    <BarChart3 className={`w-4 h-4 shrink-0 ${activeTab === 'team_performance' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                    {!isCollapsed && <span>Performance</span>}
                   </button>
                 )}
               </div>
             </div>
           )}
 
-          {/* GROUP 2: SALES (Visible to Sales & Universal roles) */}
-          {showSalesModule && (canSeeBookings || canSeeDealers) && (
-            <div>
-              {!isCollapsed && (
-                <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
-                  Sales
-                </p>
-              )}
-              <div className="space-y-1">
-                {canSeeBookings && (
-                  <button
-                    onClick={() => handleNavClick('bookings')}
-                    title={isCollapsed ? 'Dealer Bookings' : ''}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                      activeTab === 'bookings'
-                        ? 'bg-[#0d4a2d] text-white shadow-xs'
-                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                    }`}
-                  >
-                    <Package className="w-4 h-4 shrink-0 text-emerald-400" />
-                    {!isCollapsed && <span>Dealer Bookings</span>}
-                  </button>
-                )}
-
-                {canSeeDealers && (
-                  <button
-                    onClick={() => handleNavClick('dealers')}
-                    title={isCollapsed ? 'Dealers' : ''}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                      activeTab === 'dealers'
-                        ? 'bg-[#0d4a2d] text-white shadow-xs'
-                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                    }`}
-                  >
-                    <Briefcase className="w-4 h-4 shrink-0 text-emerald-400" />
-                    {!isCollapsed && <span>Dealers</span>}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* GROUP 3: WORK */}
+          {/* GROUP 2: WORKSPACE */}
           <div>
             {!isCollapsed && (
-              <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
-                Work
+              <p className="px-3 text-[10px] font-semibold text-[#C1D5C9]/70 uppercase tracking-wider mb-1.5">
+                Workspace
               </p>
             )}
-            <div className="space-y-1">
-              
-              {/* All Tasks (Company & Department scope only) */}
-              {canSeeAllTasks && (
+            <div className="space-y-0.5">
+              {canSeeMyTasks && (
                 <button
-                  onClick={() => handleNavClick('my_tasks', 'all')}
-                  title={isCollapsed ? 'All Tasks' : ''}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                    activeTab === 'my_tasks' && employeeSubFilter === 'all'
-                      ? 'bg-[#0d4a2d] text-white shadow-xs'
-                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                  }`}
+                  onClick={() => handleNavClick('my_tasks')}
+                  title={isCollapsed ? 'My Tasks' : ''}
+                  className={navItemClass(activeTab === 'my_tasks')}
                 >
-                  <div className="flex items-center gap-3">
-                    <Inbox className="w-4 h-4 shrink-0 text-emerald-400" />
-                    {!isCollapsed && <span>All Tasks</span>}
-                  </div>
-                  {!isCollapsed && taskCounts.total > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#07472B] text-emerald-200">
-                      {taskCounts.total}
-                    </span>
+                  {activePill(activeTab === 'my_tasks')}
+                  <ClipboardCheck className={`w-4 h-4 shrink-0 ${activeTab === 'my_tasks' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                  {!isCollapsed && (
+                    <div className="flex-1 flex items-center justify-between text-left">
+                      <span>My Tasks</span>
+                      {taskCounts?.myTasks > 0 && (
+                        <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded-full bg-[#0A422B] text-[#C1D5C9] border border-[#35614B]">
+                          {taskCounts.myTasks}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </button>
               )}
 
-              {/* Approvals */}
+              {canSeeAllTasks && (
+                <button
+                  onClick={() => handleNavClick('all_tasks')}
+                  title={isCollapsed ? 'Task Directory' : ''}
+                  className={navItemClass(activeTab === 'all_tasks')}
+                >
+                  {activePill(activeTab === 'all_tasks')}
+                  <ListChecks className={`w-4 h-4 shrink-0 ${activeTab === 'all_tasks' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                  {!isCollapsed && <span>Task Directory</span>}
+                </button>
+              )}
+
               {canSeeApprovals && (
                 <button
                   onClick={() => handleNavClick('approvals')}
-                  title={isCollapsed ? 'Approvals' : ''}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                    activeTab === 'approvals'
-                      ? 'bg-[#0d4a2d] text-white shadow-xs'
-                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                  }`}
+                  title={isCollapsed ? 'Sign-Offs' : ''}
+                  className={navItemClass(activeTab === 'approvals')}
                 >
-                  <div className="flex items-center gap-3">
-                    <CheckSquare className="w-4 h-4 shrink-0 text-amber-400" />
-                    {!isCollapsed && <span>Approvals</span>}
-                  </div>
-                  {!isCollapsed && pendingApprovalsCount > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30">
-                      {pendingApprovalsCount}
-                    </span>
+                  {activePill(activeTab === 'approvals')}
+                  <FileCheck className={`w-4 h-4 shrink-0 ${activeTab === 'approvals' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                  {!isCollapsed && (
+                    <div className="flex-1 flex items-center justify-between text-left">
+                      <span>Sign-Offs</span>
+                      {pendingApprovalsCount > 0 && (
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                          {pendingApprovalsCount}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </button>
               )}
 
-              {/* Escalations (Excluded from Downline & Self scopes) */}
               {canSeeEscalations && (
                 <button
                   onClick={() => handleNavClick('escalations')}
-                  title={isCollapsed ? 'Escalations' : ''}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                    activeTab === 'escalations'
-                      ? 'bg-[#0d4a2d] text-white shadow-xs'
-                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                  }`}
+                  title={isCollapsed ? 'Blockers' : ''}
+                  className={navItemClass(activeTab === 'escalations')}
                 >
-                  <div className="flex items-center gap-3">
-                    <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400" />
-                    {!isCollapsed && <span>Escalations</span>}
-                  </div>
-                  {!isCollapsed && escalationsCount > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/30">
-                      {escalationsCount}
-                    </span>
+                  {activePill(activeTab === 'escalations')}
+                  <ShieldAlert className={`w-4 h-4 shrink-0 ${activeTab === 'escalations' ? 'text-rose-400' : 'text-[#D0E2D7] group-hover:text-rose-300'}`} />
+                  {!isCollapsed && (
+                    <div className="flex-1 flex items-center justify-between text-left">
+                      <span>Blockers</span>
+                      {escalationsCount > 0 && (
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          {escalationsCount}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </button>
               )}
 
-              {/* My Tasks (Daily Task Sheet) */}
-              {canSeeMyTasks && (
-                <button
-                  onClick={() => handleNavClick('my_tasks', 'my_assigned')}
-                  title={isCollapsed ? 'My Tasks' : ''}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                    activeTab === 'my_tasks' && employeeSubFilter === 'my_assigned'
-                      ? 'bg-[#0d4a2d] text-white shadow-xs'
-                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                  }`}
-                >
-                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  {!isCollapsed && <span>My Tasks</span>}
-                </button>
-              )}
-
-              {/* Notes & Notebooks (Zoho Cliq style) */}
               {canSeeTodos && (
                 <button
                   onClick={() => handleNavClick('todos')}
-                  title={isCollapsed ? 'Notes & Notebook' : ''}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                    activeTab === 'todos'
-                      ? 'bg-[#0d4a2d] text-white shadow-xs'
-                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                  }`}
+                  title={isCollapsed ? 'To-Dos' : ''}
+                  className={navItemClass(activeTab === 'todos')}
                 >
-                  <div className="flex items-center gap-3">
-                    <BookOpen className="w-4 h-4 shrink-0 text-emerald-400" />
-                    {!isCollapsed && <span>Notes & Notebook</span>}
-                  </div>
-                  {!isCollapsed && dueRemindersCount > 0 && (
-                    <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
-                  )}
-                </button>
-              )}
-
-              {/* My Team */}
-              {canSeeTeams && (
-                <button
-                  onClick={() => handleNavClick('teams')}
-                  title={isCollapsed ? 'My Team' : ''}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                    activeTab === 'teams'
-                      ? 'bg-[#0d4a2d] text-white shadow-xs'
-                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                  }`}
-                >
-                  <Users className="w-4 h-4 shrink-0 text-emerald-400" />
-                  {!isCollapsed && <span>My Team</span>}
+                  {activePill(activeTab === 'todos')}
+                  <CalendarCheck className={`w-4 h-4 shrink-0 ${activeTab === 'todos' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                  {!isCollapsed && <span>To-Dos</span>}
                 </button>
               )}
             </div>
           </div>
 
-          {/* GROUP 4: PEOPLE (Employees Directory - Company scope only) */}
-          {canSeeEmployees && (
+          {/* GROUP 3: SALES NETWORK (Where authorized) */}
+          {showSalesModule && (canSeeDealers || canSeeBookings) && (
             <div>
               {!isCollapsed && (
-                <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
-                  People
+                <p className="px-3 text-[10px] font-semibold text-[#C1D5C9]/70 uppercase tracking-wider mb-1.5">
+                  Sales Network
                 </p>
               )}
-              <div className="space-y-1">
-                <button
-                  onClick={() => handleNavClick('organization')}
-                  title={isCollapsed ? 'Employees' : ''}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                    activeTab === 'organization'
-                      ? 'bg-[#0d4a2d] text-white shadow-xs'
-                      : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                  }`}
-                >
-                  <Building2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  {!isCollapsed && <span>Employees</span>}
-                </button>
+              <div className="space-y-0.5">
+                {canSeeDealers && (
+                  <button
+                    onClick={() => handleNavClick('dealers')}
+                    title={isCollapsed ? 'Dealers' : ''}
+                    className={navItemClass(activeTab === 'dealers')}
+                  >
+                    {activePill(activeTab === 'dealers')}
+                    <Briefcase className={`w-4 h-4 shrink-0 ${activeTab === 'dealers' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                    {!isCollapsed && <span>Dealers</span>}
+                  </button>
+                )}
+
+                {canSeeBookings && (
+                  <button
+                    onClick={() => handleNavClick('bookings')}
+                    title={isCollapsed ? 'Door Orders' : ''}
+                    className={navItemClass(activeTab === 'bookings')}
+                  >
+                    {activePill(activeTab === 'bookings')}
+                    <Package className={`w-4 h-4 shrink-0 ${activeTab === 'bookings' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                    {!isCollapsed && <span>Door Bookings</span>}
+                  </button>
+                )}
               </div>
             </div>
           )}
 
-          {/* GROUP 5: REPORTS & SETTINGS (Company & Dept scopes only) */}
-          {(canSeeReports || canSeeSettings) && (
+          {/* GROUP 4: ORGANIZATION */}
+          {(canSeeTeams || canSeeEmployees) && (
             <div>
               {!isCollapsed && (
-                <p className="px-3 text-[10px] font-bold text-emerald-300/50 uppercase tracking-wider mb-1">
-                  Reports & Settings
+                <p className="px-3 text-[10px] font-semibold text-[#C1D5C9]/70 uppercase tracking-wider mb-1.5">
+                  Organization
                 </p>
               )}
-              <div className="space-y-1">
-                {canSeeReports && (
+              <div className="space-y-0.5">
+                {canSeeTeams && (
                   <button
-                    onClick={() => handleNavClick('reports')}
-                    title={isCollapsed ? 'Reports' : ''}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                      activeTab === 'reports'
-                        ? 'bg-[#0d4a2d] text-white shadow-xs'
-                        : 'text-emerald-100/70 hover:bg-[#07472B]/60 hover:text-white'
-                    }`}
+                    onClick={() => handleNavClick('teams')}
+                    title={isCollapsed ? 'Teams & Squads' : ''}
+                    className={navItemClass(activeTab === 'teams')}
                   >
-                    <FileText className="w-4 h-4 shrink-0 text-emerald-400" />
-                    {!isCollapsed && <span>Reports</span>}
+                    {activePill(activeTab === 'teams')}
+                    <Users className={`w-4 h-4 shrink-0 ${activeTab === 'teams' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                    {!isCollapsed && <span>Teams & Squads</span>}
                   </button>
                 )}
+
+                {canSeeEmployees && (
+                  <button
+                    onClick={() => handleNavClick('organization')}
+                    title={isCollapsed ? 'Employees' : ''}
+                    className={navItemClass(activeTab === 'organization')}
+                  >
+                    {activePill(activeTab === 'organization')}
+                    <ContactRound className={`w-4 h-4 shrink-0 ${activeTab === 'organization' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                    {!isCollapsed && <span>Employees</span>}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* GROUP 5: ANALYTICS */}
+          {canSeeReports && (
+            <div>
+              {!isCollapsed && (
+                <p className="px-3 text-[10px] font-semibold text-[#C1D5C9]/70 uppercase tracking-wider mb-1.5">
+                  Analytics
+                </p>
+              )}
+              <div className="space-y-0.5">
+                <button
+                  onClick={() => handleNavClick('reports')}
+                  title={isCollapsed ? 'Reports' : ''}
+                  className={navItemClass(activeTab === 'reports')}
+                >
+                  {activePill(activeTab === 'reports')}
+                  <ChartColumn className={`w-4 h-4 shrink-0 ${activeTab === 'reports' ? 'text-white' : 'text-[#D0E2D7] group-hover:text-white'}`} />
+                  {!isCollapsed && <span>Reports</span>}
+                </button>
               </div>
             </div>
           )}
 
         </div>
 
-        {/* Footer: User Profile, Notification Bell & Direct Logout */}
-        <div className="p-3 border-t border-[#07472B]/70 shrink-0 bg-[#042818]/60 relative">
+        {/* 3. ANCHORED EMPLOYEE PROFILE SECTION */}
+        <div className="p-3 border-t border-[#35614B] shrink-0 bg-[#0A422B]/60">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <div className="w-8 h-8 rounded-full bg-[#10B981]/20 text-[#10B981] font-bold text-xs flex items-center justify-center shrink-0 border border-[#10B981]/30">
+              <div className="w-8 h-8 rounded-full bg-[#174D37] text-white font-bold text-xs flex items-center justify-center shrink-0 border border-[#35614B]">
                 {getInitials(currentUser?.fullName || currentUser?.name)}
               </div>
               {!isCollapsed && (
                 <div className="truncate">
-                  <p className="text-xs font-semibold text-white truncate">
+                  <p className="text-xs font-semibold text-white truncate leading-tight">
                     {currentUser?.fullName || currentUser?.name || 'Staff User'}
                   </p>
-                  <p className="text-[10px] text-emerald-300/70 truncate">
+                  <p className="text-[10px] text-[#C1D5C9] truncate">
                     {currentUser?.role || 'Staff'}
                   </p>
                 </div>
               )}
             </div>
 
-            <div className="flex items-center gap-1">
-              {/* Notification Bell */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsAlertsOpen(prev => !prev)}
-                  className="p-1.5 rounded-lg text-emerald-300/80 hover:text-white hover:bg-[#07472B] transition relative cursor-pointer"
-                  title="Operational Alerts"
-                  aria-label="Operational Alerts"
-                >
-                  <Bell className="w-4 h-4" />
-                  {systemAlerts.length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-rose-600 text-white font-bold text-[9px] w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
-                      {systemAlerts.length}
-                    </span>
-                  )}
-                </button>
-
-                {/* Alerts Popover */}
-                {isAlertsOpen && (
-                  <div className="absolute left-full bottom-0 ml-2 w-72 sm:w-80 bg-white text-slate-800 rounded-2xl shadow-2xl border border-slate-200 p-3 z-50 animate-in fade-in slide-in-from-left-2 duration-150">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
-                      <span className="text-xs font-bold text-slate-900">Task & Planner Alerts</span>
-                      <span className="text-[10px] font-semibold text-slate-400">{systemAlerts.length} active</span>
-                    </div>
-
-                    {systemAlerts.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-4 text-center">No active alerts at this moment</p>
-                    ) : (
-                      <div className="space-y-2 max-h-64 overflow-y-auto">
-                        {systemAlerts.map(a => (
-                          <div 
-                            key={a.id}
-                            onClick={() => {
-                              if (onNavigateToTab) onNavigateToTab(a.actionTab);
-                              else onTabChange(a.actionTab);
-                              setIsAlertsOpen(false);
-                            }}
-                            className="p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 cursor-pointer transition text-xs border border-slate-100 text-left"
-                          >
-                            <p className="font-bold text-slate-800">{a.title}</p>
-                            <p className="text-[11px] text-slate-500 mt-0.5">{a.desc}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <button
-                onClick={logout}
-                title="Sign Out"
-                className="p-1.5 rounded-lg text-emerald-300/60 hover:text-white hover:bg-rose-900/40 transition cursor-pointer"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
+            <button
+              onClick={logout}
+              title="Sign Out"
+              className="p-1.5 rounded-md text-[#C1D5C9] hover:text-rose-400 hover:bg-[#174D37] transition cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
 

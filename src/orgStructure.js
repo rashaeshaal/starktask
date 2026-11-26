@@ -98,7 +98,7 @@ export const MASTER_DESIGNATIONS = [
   { id: 'des_storekeeper', title: 'Storekeeper', departmentId: 'inventory', level: 5, reportsToDesignationId: 'des_inv_sup' },
 
   // Sales
-  { id: 'des_cso', title: 'CSO', departmentId: 'sales', level: 3, reportsToDesignationId: 'des_gm' },
+  { id: 'des_cso', title: 'CSO', departmentId: 'sales', level: 3, reportsToDesignationId: 'des_dir_ops' },
   { id: 'des_ssm', title: 'SSM', departmentId: 'sales', level: 4, reportsToDesignationId: 'des_cso' },
   { id: 'des_asm', title: 'ASM', departmentId: 'sales', level: 5, reportsToDesignationId: 'des_ssm' },
   { id: 'des_sales_coord', title: 'Sales Coordinator', departmentId: 'sales', level: 6, reportsToDesignationId: 'des_asm' },

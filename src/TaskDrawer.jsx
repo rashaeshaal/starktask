@@ -5,12 +5,13 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Check, Edit3, Calendar, Clock, User, Building2, 
   MapPin, AlertCircle, GitFork, Paperclip, CheckSquare, 
-  Square, Plus, Loader2 
+  Square, Plus, Loader2, Lock 
 } from 'lucide-react';
 import StatusPill from './StatusPill';
 import PriorityPill from './PriorityPill';
 import { formatName, formatDepartment, formatDue } from './taskHelpers';
 import { TASK_STATUSES, TASK_PRIORITIES } from './rbac';
+import { isDailyWorkLogLocked } from './dateUtils';
 
 export default function TaskDrawer({
   isOpen,
@@ -50,6 +51,9 @@ export default function TaskDrawer({
   }, [isOpen, onClose]);
 
   if (!isOpen || !task) return null;
+
+  const taskDateVal = task.taskDate || task.date || task.dueDate || task.deadlineDate;
+  const isLocked = isDailyWorkLogLocked(taskDateVal);
 
   const dueInfo = formatDue(task.requiredBy || task.deadlineDate || task.date || task.taskDate);
   const assigneeName = formatName(task.assignedToName || task.assigneeName || 'Unassigned');
@@ -120,19 +124,26 @@ export default function TaskDrawer({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsEditing(!isEditing)}
-                aria-label={isEditing ? "Cancel editing" : "Edit task"}
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <Edit3 className="w-4 h-4" />
-              </button>
+              {isLocked ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200" title="Today's work log is locked. Entries can no longer be modified.">
+                  <Lock className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Locked</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(!isEditing)}
+                  aria-label={isEditing ? "Cancel editing" : "Edit task"}
+                  className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Edit3 className="w-4 h-4" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Close drawer"
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -141,6 +152,19 @@ export default function TaskDrawer({
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            
+            {/* Locked Notice Banner */}
+            {isLocked && (
+              <div className="p-3.5 rounded-2xl bg-slate-100 border border-slate-200 text-slate-700 space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                  <Lock className="w-4 h-4 text-slate-600 shrink-0" />
+                  <span>Record Locked (Read-Only)</span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Today's work log is locked. Entries can no longer be modified. Daily logs become permanently read-only at 11:59 PM.
+                </p>
+              </div>
+            )}
             
             {/* Title & Description */}
             {isEditing ? (

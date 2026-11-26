@@ -208,9 +208,10 @@ export const TEST_PERSONAS = [
     email: 'hareesh@starkdoors.com',
     role: 'Driver',
     department: 'transportation',
+    employeeId: '115',
     expectedScope: SCOPES.SELF,
-    allowed: ['Frontline Mobile UI (Large Start/Done Buttons)', 'Submit 10MB Photo Proof', 'My Tasks', 'To-Do', 'My Team (Read-only)'],
-    forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers', 'Bookings']
+    allowed: ['Frontline Mobile UI (Large Start/Done Buttons)', 'Submit 10MB Photo Proof', 'My Tasks', 'To-Do', 'My Team (Read-only)', 'Door Bookings'],
+    forbidden: ['Assign Button', 'Approvals', 'Team Performance', 'Dealers']
   },
   {
     id: 'emp_133',

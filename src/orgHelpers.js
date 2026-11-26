@@ -1,7 +1,7 @@
 // src/orgHelpers.js
 // Centralized organization helpers for STARK STEEL SalesDoor Enterprise
 
-import { getRoleLevel } from './orgTree';
+import { getRoleLevel } from './orgTree.js';
 
 /**
  * Format names to Title Case cleanly

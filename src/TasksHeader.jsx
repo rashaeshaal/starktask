@@ -2,27 +2,37 @@
 // Page header and underline navigation tabs for My Tasks
 
 import React from 'react';
-import { PlusCircle, Send, CheckSquare, Truck, Megaphone } from 'lucide-react';
+import { PlusCircle, Send, CheckSquare, Truck, Megaphone, Lock } from 'lucide-react';
 import { pluralize } from './taskHelpers';
 
 export default function TasksHeader({
   viewMode,
   onViewModeChange,
+  isAllTasks = false,
   todayCount = 0,
   assignedByMeCount = 0,
   salesLinkedCount = 0,
   marketingRequestsCount = 0,
   canSeeSalesLinked = false,
   canSeeMarketingRequests = false,
-  onOpenAddWork
+  onOpenAddWork,
+  isTodayLocked = false
 }) {
-  const tabs = [
-    {
-      id: 'my_tasks',
-      label: 'My Work',
-      count: todayCount
-    }
-  ];
+  const tabs = isAllTasks 
+    ? [
+        {
+          id: 'all_tasks',
+          label: 'Directory',
+          count: todayCount
+        }
+      ]
+    : [
+        {
+          id: 'my_tasks',
+          label: 'My Work',
+          count: todayCount
+        }
+      ];
 
   if (canSeeSalesLinked) {
     tabs.push({
@@ -48,10 +58,10 @@ export default function TasksHeader({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
-            My Tasks
+            {isAllTasks ? 'Task Directory' : 'My Tasks'}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            {pluralize(todayCount, 'task')} today
+            {isAllTasks ? `${todayCount} total operational tasks` : `${pluralize(todayCount, 'task')} today`}
           </p>
         </div>
 
@@ -59,10 +69,20 @@ export default function TasksHeader({
         <button
           type="button"
           onClick={onOpenAddWork}
-          className="h-10 px-4 rounded-xl bg-[#05331F] hover:bg-[#0a4a2f] text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-2xs focus-visible:ring-2 focus-visible:ring-emerald-500/40 w-full sm:w-auto"
+          disabled={isTodayLocked}
+          className={`h-10 px-4 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-2xs focus-visible:ring-2 focus-visible:ring-emerald-500/40 w-full sm:w-auto ${
+            isTodayLocked
+              ? 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-80'
+              : 'bg-[#05331F] hover:bg-[#0a4a2f] text-white cursor-pointer'
+          }`}
+          title={isTodayLocked ? "Today's work log is locked. Entries can no longer be modified." : "Add today's work"}
         >
-          <PlusCircle className="w-[18px] h-[18px] text-emerald-300" strokeWidth={1.75} />
-          <span>Add today's work</span>
+          {isTodayLocked ? (
+            <Lock className="w-[16px] h-[16px] text-slate-500" strokeWidth={2} />
+          ) : (
+            <PlusCircle className="w-[18px] h-[18px] text-emerald-300" strokeWidth={1.75} />
+          )}
+          <span>{isTodayLocked ? 'Work Log Locked' : "Add today's work"}</span>
         </button>
       </div>
 

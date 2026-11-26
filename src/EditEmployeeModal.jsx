@@ -37,6 +37,7 @@ export default function EditEmployeeModal({
   const [role, setRole] = useState('');
   const [status, setStatus] = useState('active');
   const [reportsTo, setReportsTo] = useState('');
+  const [canAssignTask, setCanAssignTask] = useState(false);
 
   // Password Reset Panel State
   const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
@@ -58,6 +59,7 @@ export default function EditEmployeeModal({
       setRole(employee.role || employee.designation || '');
       setStatus(employee.status || employee.employmentStatus || 'active');
       setReportsTo(employee.reportsTo || employee.reportingManagerId || '');
+      setCanAssignTask(employee.canAssignTask === true || (employee.canAssignTask !== false && Boolean(getRoleLevel(employee.role || employee.designation) <= 5)));
       setIsResetPasswordOpen(false);
       setNewPassword('');
       setResetSuccessMessage('');
@@ -129,6 +131,7 @@ export default function EditEmployeeModal({
       role: role.trim() || designation,
       reportsTo: reportsTo || null,
       reportingManagerId: reportsTo || null,
+      canAssignTask: canAssignTask,
       status: status,
       employmentStatus: status
     };
@@ -381,6 +384,25 @@ export default function EditEmployeeModal({
               <option value="active">Active (Full Portal Access)</option>
               <option value="inactive">Inactive / Deactivated (Account Disabled)</option>
             </select>
+          </div>
+
+          {/* HR Task Assignment Permission Control */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between">
+            <div>
+              <div className="font-bold text-slate-900 text-xs">Task Delegation Authority</div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Allow this employee to assign tasks to downline team members
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={canAssignTask} 
+                onChange={(e) => setCanAssignTask(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#05331F]"></div>
+            </label>
           </div>
 
           {/* Password Reset Section */}

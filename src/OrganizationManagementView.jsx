@@ -3,13 +3,16 @@ import {
   Building2, Users, Briefcase, Plus, Upload, CheckCircle2, 
   Trash2, Edit, ChevronRight, Search, Filter, Shield, UserCheck, 
   FileSpreadsheet, MoreHorizontal, KeyRound, AlertCircle, Check, 
-  X, Loader2, Download, ArrowDownRight, Network, Archive, RefreshCw
+  X, Loader2, Download, ArrowDownRight, Network, Archive, RefreshCw,
+  GitBranch, Save, Layers, Box
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { canManageEmployees, canManageOrgStructure, can, PERMISSIONS, isCompanyHead, COMPANY_HEAD_ROLES } from './permissions';
 import { COMPANY_DEPARTMENTS, ORG_TREE, getRoleLevel } from './orgTree';
 import { useDepartments } from './useDepartments';
-import { writeAuditLog } from './firestoreService';
+import { writeAuditLog, subscribeToOrgSettings, updateOrgSettings, subscribeToDoorCatalog, saveDoorModel, deleteDoorModel } from './firestoreService';
+import { STARK_DOOR_CATALOG } from './doorCatalog';
+import EditDoorModelModal from './EditDoorModelModal';
 import { apiCreateEmployee, apiSetEmployeeStatus, apiResetEmployeePassword } from './firebase';
 import EditEmployeeModal from './EditEmployeeModal';
 import EditDesignationModal from './EditDesignationModal';
@@ -64,6 +67,20 @@ export default function OrganizationManagementView({
   const [importedCredentialsSheet, setImportedCredentialsSheet] = useState(null);
   const [hasDownloadedCredentials, setHasDownloadedCredentials] = useState(false);
 
+  // Dynamic Order Chain Settings State
+  const [orgSettings, setOrgSettings] = useState({});
+  const [selectedAccountsAssigneeId, setSelectedAccountsAssigneeId] = useState('');
+  const [selectedWarehouseAssigneeId, setSelectedWarehouseAssigneeId] = useState('');
+  const [selectedTransportAssigneeId, setSelectedTransportAssigneeId] = useState('');
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  // Door Catalog & Models State
+  const [doorCatalogData, setDoorCatalogData] = useState([]);
+  const [isAddDoorModelOpen, setIsAddDoorModelOpen] = useState(false);
+  const [editingDoorModel, setEditingDoorModel] = useState(null);
+  const [doorCategoryFilter, setDoorCategoryFilter] = useState('all');
+  const [doorSearchTerm, setDoorSearchTerm] = useState('');
+
   // Modern Toast Context
   const { showToast, confirm } = useToast();
 
@@ -73,7 +90,93 @@ export default function OrganizationManagementView({
 
   const isHR = can(currentUser, PERMISSIONS.EMPLOYEE_VIEW);
   const canManageOrg = canManageOrgStructure(currentUser);
+  const isDirectorOps = (currentUser?.role || '').toLowerCase().includes('director operations') || isCompanyHead(currentUser);
+  const canManageDoors = isHR || canManageOrg || isDirectorOps;
   const currentUserId = currentUser?.id || currentUser?.uid || currentUser?.employeeId;
+
+  // Subscribe to live org settings
+  React.useEffect(() => {
+    const unsub = subscribeToOrgSettings((settings) => {
+      setOrgSettings(settings || {});
+      if (settings?.accountsAssigneeId) setSelectedAccountsAssigneeId(settings.accountsAssigneeId);
+      if (settings?.warehouseAssigneeId) setSelectedWarehouseAssigneeId(settings.warehouseAssigneeId);
+      if (settings?.transportAssigneeId) setSelectedTransportAssigneeId(settings.transportAssigneeId);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to live door models (fallback to STARK_DOOR_CATALOG)
+  React.useEffect(() => {
+    const unsub = subscribeToDoorCatalog((models) => {
+      if (models && models.length > 0) {
+        // Merge catalog with factory defaults if some are not yet in Firestore
+        const map = new Map();
+        STARK_DOOR_CATALOG.forEach(item => map.set(item.model, item));
+        models.forEach(item => map.set(item.model, item));
+        setDoorCatalogData(Array.from(map.values()));
+      } else {
+        setDoorCatalogData(STARK_DOOR_CATALOG);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Filter staff by department for routing selector
+  const financeStaff = useMemo(() => {
+    return employees.filter(e => {
+      const d = (e.department || e.departmentId || '').toLowerCase();
+      const r = (e.role || e.designation || '').toLowerCase();
+      return (d === 'finance' || d === 'accounts' || r.includes('account'));
+    });
+  }, [employees]);
+
+  const warehouseStaff = useMemo(() => {
+    return employees.filter(e => {
+      const d = (e.department || e.departmentId || '').toLowerCase();
+      const r = (e.role || e.designation || '').toLowerCase();
+      return (d === 'warehouse' || r.includes('warehouse'));
+    });
+  }, [employees]);
+
+  const transportStaff = useMemo(() => {
+    return employees.filter(e => {
+      const d = (e.department || e.departmentId || '').toLowerCase();
+      const r = (e.role || e.designation || '').toLowerCase();
+      return (d === 'transportation' || d === 'transport' || r.includes('transport') || r.includes('driver'));
+    });
+  }, [employees]);
+
+  const handleSaveRoutingSettings = async (e) => {
+    e?.preventDefault();
+    setIsSavingSettings(true);
+    try {
+      const accEmp = employees.find(emp => (emp.id || emp.uid || emp.employeeId) === selectedAccountsAssigneeId);
+      const whEmp = employees.find(emp => (emp.id || emp.uid || emp.employeeId) === selectedWarehouseAssigneeId);
+      const trEmp = employees.find(emp => (emp.id || emp.uid || emp.employeeId) === selectedTransportAssigneeId);
+
+      const updates = {};
+      if (selectedAccountsAssigneeId) {
+        updates.accountsAssigneeId = selectedAccountsAssigneeId;
+        updates.accountsAssigneeName = accEmp ? (accEmp.fullName || accEmp.name) : 'Accounts Manager';
+      }
+      if (selectedWarehouseAssigneeId) {
+        updates.warehouseAssigneeId = selectedWarehouseAssigneeId;
+        updates.warehouseAssigneeName = whEmp ? (whEmp.fullName || whEmp.name) : 'Warehouse In-charge';
+      }
+      if (selectedTransportAssigneeId) {
+        updates.transportAssigneeId = selectedTransportAssigneeId;
+        updates.transportAssigneeName = trEmp ? (trEmp.fullName || trEmp.name) : 'Transport Manager';
+      }
+
+      await updateOrgSettings(updates, currentUser);
+      showToast('Order chain dispatch routing settings updated successfully!', 'success');
+    } catch (err) {
+      console.error('Failed to update routing settings:', err);
+      showToast('Failed to save settings: ' + err.message, 'error');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   // Filtered employees for directory
   const filteredEmployees = useMemo(() => {
@@ -498,7 +601,9 @@ export default function OrganizationManagementView({
             { id: 'directory', label: 'Employee Directory', icon: Users, count: filteredEmployees.length },
             { id: 'hierarchy', label: 'Hierarchy Tree', icon: Network },
             { id: 'depts', label: 'Departments', icon: Building2, count: allDepartments.length },
-            { id: 'designations', label: 'Designations', icon: Briefcase, count: designations.length }
+            { id: 'designations', label: 'Designations', icon: Briefcase, count: designations.length },
+            ...(isHR || canManageOrg ? [{ id: 'order_routing', label: 'Order Chain Routing', icon: GitBranch }] : []),
+            ...(canManageDoors ? [{ id: 'doors', label: 'Door Models & Catalog', icon: Layers, count: doorCatalogData.length }] : [])
           ].map(tab => {
             const Icon = tab.icon;
             const isActive = activeOrgTab === tab.id;
@@ -699,6 +804,325 @@ export default function OrganizationManagementView({
         </div>
       )}
 
+      {/* TAB 5: ORDER CHAIN ROUTING (HR & Management Configuration) */}
+      {activeOrgTab === 'order_routing' && (isHR || canManageOrg) && (
+        <div role="tabpanel" className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                Dealer Order & Dispatch Chain Routing
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Configure which personnel automatically receive linked workflow tasks when a salesperson books dealer orders.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-6 space-y-6">
+            <form onSubmit={handleSaveRoutingSettings} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* 1. Accounts & Payment Verification Stage */}
+                <div className="p-4 rounded-xl border border-slate-100 bg-slate-50 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs">
+                      1
+                    </span>
+                    <h3 className="font-bold text-slate-900 text-xs">
+                      Accounts Desk (Stage 2: Payment Verification)
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    The designated officer who receives the advance payment token / bank credit verification task for newly booked orders.
+                  </p>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Designated Finance Officer *
+                    </label>
+                    <select
+                      value={selectedAccountsAssigneeId}
+                      onChange={(e) => setSelectedAccountsAssigneeId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 focus:outline-none focus:border-[#05331F]"
+                    >
+                      <option value="">-- Auto Select Department Head --</option>
+                      {financeStaff.map(emp => {
+                        const eid = emp.id || emp.uid || emp.employeeId;
+                        return (
+                          <option key={eid} value={eid}>
+                            {emp.fullName || emp.name} ({emp.role || emp.designation} · ID: {emp.employeeId || emp.id})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 2. Warehouse Staging & Loading Stage */}
+                <div className="p-4 rounded-xl border border-slate-100 bg-slate-50 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-slate-700 text-white flex items-center justify-center font-bold text-xs">
+                      2
+                    </span>
+                    <h3 className="font-bold text-slate-900 text-xs">
+                      Warehouse Desk (Stage 3: Picking & Staging)
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Receives door model picking, QC handover and dispatch staging instructions once payment is approved.
+                  </p>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Warehouse In-charge / Supervisor
+                    </label>
+                    <select
+                      value={selectedWarehouseAssigneeId}
+                      onChange={(e) => setSelectedWarehouseAssigneeId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 focus:outline-none focus:border-[#05331F]"
+                    >
+                      <option value="">-- Auto Select Department Head --</option>
+                      {warehouseStaff.map(emp => {
+                        const eid = emp.id || emp.uid || emp.employeeId;
+                        return (
+                          <option key={eid} value={eid}>
+                            {emp.fullName || emp.name} ({emp.role || emp.designation} · ID: {emp.employeeId || emp.id})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 3. Transportation & Dispatch Stage */}
+                <div className="p-4 rounded-xl border border-slate-100 bg-slate-50 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-slate-700 text-white flex items-center justify-center font-bold text-xs">
+                      3
+                    </span>
+                    <h3 className="font-bold text-slate-900 text-xs">
+                      Transport Desk (Stage 4: Vehicle Delivery)
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Receives the gate pass, trip sheet, route delivery plan and final customer POD sign-off task.
+                  </p>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      Transport Manager / Coordinator
+                    </label>
+                    <select
+                      value={selectedTransportAssigneeId}
+                      onChange={(e) => setSelectedTransportAssigneeId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 focus:outline-none focus:border-[#05331F]"
+                    >
+                      <option value="">-- Auto Select Department Head --</option>
+                      {transportStaff.map(emp => {
+                        const eid = emp.id || emp.uid || emp.employeeId;
+                        return (
+                          <option key={eid} value={eid}>
+                            {emp.fullName || emp.name} ({emp.role || emp.designation} · ID: {emp.employeeId || emp.id})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-xs text-slate-500">
+                  Changes take effect immediately for all subsequent dealer door bookings logged by sales personnel.
+                </span>
+                <button
+                  type="submit"
+                  disabled={isSavingSettings}
+                  className="px-5 py-2.5 rounded-xl bg-[#05331F] hover:bg-[#0a4a2f] text-white font-semibold text-xs flex items-center gap-2 transition disabled:opacity-50 shadow-2xs"
+                >
+                  {isSavingSettings ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5 text-emerald-300" />
+                      <span>Save Routing Configuration</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 6: DOOR CATALOG & MODELS MASTER DATA (HR & Director Operations) */}
+      {activeOrgTab === 'doors' && canManageDoors && (
+        <div role="tabpanel" className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                <span>STARK Door Models & Specifications Master</span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-[#05331F] font-bold">
+                  {doorCatalogData.length} Models
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Manage factory production door models, categories, and size variants used in dealer bookings and order processing.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingDoorModel(null);
+                  setIsAddDoorModelOpen(true);
+                }}
+                className="h-10 px-4 bg-[#05331F] hover:bg-[#0a4a2f] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-emerald-300" />
+                <span>Add Door Model</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Filter & Search Toolbar */}
+          <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center gap-3 justify-between">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search models (e.g. SRK 001, SRK 504)..."
+                value={doorSearchTerm}
+                onChange={(e) => setDoorSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:border-[#05331F]"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <span className="text-xs font-medium text-slate-500 shrink-0">Category:</span>
+              <select
+                value={doorCategoryFilter}
+                onChange={(e) => setDoorCategoryFilter(e.target.value)}
+                className="px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white text-slate-700 focus:outline-none focus:border-[#05331F]"
+              >
+                <option value="all">All Categories</option>
+                <option value="Standard Series">Standard Series</option>
+                <option value="Luxury Series">Luxury Series</option>
+                <option value="Standard Series (90mm Series)">Standard Series (90mm Series)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Door Models Table / Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {doorCatalogData
+              .filter(d => {
+                const matchesCat = doorCategoryFilter === 'all' || d.category === doorCategoryFilter;
+                const matchesSearch = !doorSearchTerm.trim() || 
+                  (d.model || '').toLowerCase().includes(doorSearchTerm.toLowerCase()) ||
+                  (d.variants || []).some(v => (v.size || '').toLowerCase().includes(doorSearchTerm.toLowerCase()));
+                return matchesCat && matchesSearch;
+              })
+              .map((door) => {
+                const continueCount = (door.variants || []).filter(v => v.status === 'CONTINUE').length;
+                const stopCount = (door.variants || []).filter(v => v.status === 'STOP').length;
+
+                return (
+                  <div
+                    key={door.model}
+                    className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs hover:shadow-xs transition flex flex-col justify-between space-y-3"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#05331F] flex items-center justify-center font-bold text-sm">
+                            <Box className="w-5 h-5 text-emerald-800" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-slate-900 text-sm">
+                              {door.model}
+                            </h3>
+                            <span className="inline-block text-[11px] font-medium text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md mt-0.5">
+                              {door.category}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingDoorModel(door);
+                            setIsAddDoorModelOpen(true);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                          title="Edit door model & variants"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {door.description && (
+                        <p className="text-[11px] text-slate-500 mt-2 line-clamp-2">
+                          {door.description}
+                        </p>
+                      )}
+
+                      {/* Variants Summary */}
+                      <div className="mt-3 pt-3 border-t border-slate-100">
+                        <div className="flex items-center justify-between text-[11px] text-slate-600 mb-1.5">
+                          <span className="font-semibold">Variants ({door.variants?.length || 0})</span>
+                          <span className="text-[10px]">
+                            <span className="text-emerald-700 font-bold">{continueCount} Active</span>
+                            {stopCount > 0 && <span className="text-rose-600 font-bold ml-1.5">{stopCount} Stopped</span>}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto pr-1">
+                          {(door.variants || []).slice(0, 5).map((v, idx) => (
+                            <span
+                              key={idx}
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono ${
+                                v.status === 'CONTINUE'
+                                  ? 'bg-slate-100 text-slate-700'
+                                  : 'bg-rose-50 text-rose-700 line-through'
+                              }`}
+                            >
+                              {v.size}
+                            </span>
+                          ))}
+                          {(door.variants || []).length > 5 && (
+                            <span className="px-1.5 py-0.5 text-[10px] text-slate-400 font-semibold">
+                              +{(door.variants || []).length - 5} more
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-50 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">
+                        Status: <strong className="text-slate-700">{door.status || 'Active'}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingDoorModel(door);
+                          setIsAddDoorModelOpen(true);
+                        }}
+                        className="text-emerald-700 hover:text-emerald-900 font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>Configure</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
       {/* PROFILE SLIDE-OVER DRAWER */}
       <EmployeeProfileDrawer
         isOpen={Boolean(profileDrawerEmployee)}
@@ -879,6 +1303,39 @@ export default function OrganizationManagementView({
 
           </div>
         </div>
+      )}
+
+      {/* MODAL 5: Add / Edit Door Model */}
+      {isAddDoorModelOpen && (
+        <EditDoorModelModal
+          isOpen={isAddDoorModelOpen}
+          onClose={() => {
+            setIsAddDoorModelOpen(false);
+            setEditingDoorModel(null);
+          }}
+          model={editingDoorModel}
+          currentUser={currentUser}
+          onSave={async (doorData) => {
+            try {
+              await saveDoorModel(doorData, currentUser);
+              showToast(`Door Model ${doorData.model} saved successfully!`, 'success');
+              // Optimistic local state update
+              setDoorCatalogData(prev => {
+                const existingIdx = prev.findIndex(d => d.model === doorData.model);
+                if (existingIdx >= 0) {
+                  const updated = [...prev];
+                  updated[existingIdx] = { ...updated[existingIdx], ...doorData };
+                  return updated;
+                }
+                return [doorData, ...prev];
+              });
+            } catch (err) {
+              console.error('Failed to save door model:', err);
+              showToast('Error saving door model: ' + err.message, 'error');
+              throw err;
+            }
+          }}
+        />
       )}
 
     </div>

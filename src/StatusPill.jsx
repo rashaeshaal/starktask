@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
 import { TASK_STATUSES } from './rbac';
 import { STATUS_CONFIG, formatTime } from './taskHelpers';
+import { isDailyWorkLogLocked } from './dateUtils';
 
 export default function StatusPill({
   task,
@@ -18,6 +19,9 @@ export default function StatusPill({
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
 
+  const taskDateVal = task?.taskDate || task?.date || task?.deadlineDate;
+  const isLocked = isDailyWorkLogLocked(taskDateVal);
+  const isDisabled = disabled || isLocked;
   const rawStatus = task?.status || TASK_STATUSES.ASSIGNED;
   const isCompleted = (String(rawStatus).toLowerCase() === 'completed') || 
                       rawStatus === TASK_STATUSES.COMPLETED || 
@@ -79,7 +83,7 @@ export default function StatusPill({
   const toggleDropdown = (e) => {
     e.stopPropagation();
     e.preventDefault();
-    if (disabled) return;
+    if (isDisabled) return;
     if (!isOpen) {
       updatePosition();
     }
@@ -98,9 +102,12 @@ export default function StatusPill({
   const completedTime = isCompleted ? formatTime(task?.completedAt || task?.lastUpdated) : null;
   const statusDisplay = isCompleted && completedTime ? `Done ${completedTime}` : (config?.label || currentStatus);
 
-  if (disabled) {
+  if (isDisabled) {
     return (
-      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap ${config?.bg || 'bg-slate-50'} ${config?.text || 'text-slate-700'} ${config?.border || 'border-slate-200'}`}>
+      <span 
+        title={isLocked ? "Today's work log is locked. Entries can no longer be modified." : undefined}
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border whitespace-nowrap ${config?.bg || 'bg-slate-50'} ${config?.text || 'text-slate-700'} ${config?.border || 'border-slate-200'}`}
+      >
         {isCompleted ? (
           <Check className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
         ) : (

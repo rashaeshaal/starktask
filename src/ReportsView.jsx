@@ -167,22 +167,22 @@ export default function ReportsView({ tasks = [], employees = [], currentUser })
       </div>
 
       {/* KPI Overview */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-          <p className="text-xs text-slate-500 font-medium">Logged Tasks</p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">{total}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+        <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+          <p className="text-[11px] text-slate-500 font-medium">Logged Tasks</p>
+          <p className="text-lg sm:text-xl font-bold text-slate-900 mt-0.5">{total}</p>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-          <p className="text-xs text-slate-500 font-medium">Completed</p>
-          <p className="text-2xl font-bold text-[#10B981] mt-1">{completed}</p>
+        <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+          <p className="text-[11px] text-slate-500 font-medium">Completed</p>
+          <p className="text-lg sm:text-xl font-bold text-[#10B981] mt-0.5">{completed}</p>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-          <p className="text-xs text-slate-500 font-medium">Completion Rate</p>
-          <p className="text-2xl font-bold text-[#05331F] mt-1">{rate}%</p>
+        <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+          <p className="text-[11px] text-slate-500 font-medium">Completion Rate</p>
+          <p className="text-lg sm:text-xl font-bold text-[#05331F] mt-0.5">{rate}%</p>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-          <p className="text-xs text-slate-500 font-medium">Overdue / Action Needed</p>
-          <p className={`text-2xl font-bold mt-1 ${overdue > 0 ? 'text-rose-600' : 'text-slate-900'}`}>{overdue}</p>
+        <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+          <p className="text-[11px] text-slate-500 font-medium">Overdue / Action Needed</p>
+          <p className={`text-lg sm:text-xl font-bold mt-0.5 ${overdue > 0 ? 'text-rose-600' : 'text-slate-900'}`}>{overdue}</p>
         </div>
       </div>
 

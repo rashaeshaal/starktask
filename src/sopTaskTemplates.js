@@ -23,12 +23,12 @@ export const SOP_TASK_TEMPLATES = [
       { id: 'c2', text: 'Verify basic order parameters: model, quantity, dealer code' },
       { id: 'c3', text: 'Confirm preliminary payment terms / advance token' }
     ],
-    instructions: 'Collect all morning dealer orders. Complete preliminary checks before the 11:00 AM cutoff.',
+    instructions: 'Collect all morning dealer orders. Complete preliminary checks with dealers.',
     active: true
   },
   {
     id: 'tpl_sales_final_submission',
-    title: 'Final Order Submission (Mandatory 11:00 AM Cutoff)',
+    title: 'Final Order Submission',
     departmentId: 'sales',
     departmentName: 'Sales',
     targetDesignation: 'Sales Coordinator',
@@ -36,15 +36,15 @@ export const SOP_TASK_TEMPLATES = [
     priority: 'Critical',
     scheduleType: 'daily',
     startTime: '10:30 AM',
-    deadlineTime: '11:00 AM',
+    deadlineTime: '06:00 PM',
     requiresApproval: true,
     requiresEvidence: true,
     checklist: [
       { id: 'c1', text: 'Verify 12-point mandatory fields (dealer, customer, address, PIN, phones, specs)' },
       { id: 'c2', text: 'Ensure 6-digit PIN code and full delivery address are complete' },
-      { id: 'c3', text: 'Submit final confirmed orders into ERP system before 11:00 AM' }
+      { id: 'c3', text: 'Submit final confirmed orders into ERP system' }
     ],
-    instructions: 'Strict Cutoff: 11:00 AM. Incomplete orders automatically set to PAYMENT/OPERATIONAL HOLD.',
+    instructions: 'Submit confirmed dealer orders. Incomplete orders automatically set to PAYMENT/OPERATIONAL HOLD.',
     active: true
   },
   {
@@ -56,8 +56,8 @@ export const SOP_TASK_TEMPLATES = [
     category: 'SOP Scheduled Task',
     priority: 'Critical',
     scheduleType: 'daily',
-    startTime: '11:00 AM',
-    deadlineTime: '11:30 AM',
+    startTime: '09:00 AM',
+    deadlineTime: '06:00 PM',
     requiresApproval: true,
     requiresEvidence: false,
     checklist: [
@@ -103,8 +103,8 @@ export const SOP_TASK_TEMPLATES = [
     category: 'SOP Scheduled Task',
     priority: 'Critical',
     scheduleType: 'daily',
-    startTime: '12:00 PM',
-    deadlineTime: '12:15 PM',
+    startTime: '01:00 PM',
+    deadlineTime: '02:00 PM',
     requiresApproval: true,
     requiresEvidence: false,
     checklist: [
@@ -113,7 +113,7 @@ export const SOP_TASK_TEMPLATES = [
       { id: 'c3', text: 'Align with Transportation for required vehicle fleet & route matrix' },
       { id: 'c4', text: 'Formally hand over execution order sheet to Warehouse In-charge' }
     ],
-    instructions: 'Final Operations Handover by 12:15 PM. Sets up daily factory loading quota.',
+    instructions: 'Operations Handover and Allocation. Sets up daily factory loading quota.',
     active: true
   },
   {
@@ -149,22 +149,22 @@ export const SOP_TASK_TEMPLATES = [
     category: 'SOP Scheduled Task',
     priority: 'High',
     scheduleType: 'daily',
-    startTime: '12:15 PM',
-    deadlineTime: '01:00 PM',
-    requiresApproval: false,
+    startTime: '01:00 PM',
+    deadlineTime: '02:30 PM',
+    requiresApproval: true,
     requiresEvidence: false,
     checklist: [
-      { id: 'c1', text: 'Receive approved orders sheet by 12:15 PM' },
-      { id: 'c2', text: 'Verify physical stock availability for each door model and size' },
-      { id: 'c3', text: 'Flag any model shortages immediately to Operations Head' },
-      { id: 'c4', text: 'Prepare dealer-wise and route-wise loading sequence' }
+      { id: 'c1', text: 'Review daily warehouse work requirements & approved orders' },
+      { id: 'c2', text: 'Prepare daily allocation work instructions for supervisors' },
+      { id: 'c3', text: 'Distribute work among Warehouse Supervisors with priorities & deadlines' },
+      { id: 'c4', text: 'Monitor staging area readiness and submit daily allocation summary' }
     ],
-    instructions: 'Warehouse order intake and staging preparation.',
+    instructions: 'Task assignment and monitoring activity. Set up daily factory loading quota and supervise allocation.',
     active: true
   },
   {
     id: 'tpl_wh_picking',
-    title: 'Warehouse Picking, Product Protection & Staging',
+    title: 'Warehouse Picking, Product Protection & Verification',
     departmentId: 'warehouse',
     departmentName: 'Warehouse',
     targetDesignation: 'Warehouse Supervisor',
@@ -173,15 +173,62 @@ export const SOP_TASK_TEMPLATES = [
     scheduleType: 'daily',
     startTime: '01:00 PM',
     deadlineTime: '03:30 PM',
-    requiresApproval: false,
+    requiresApproval: true,
     requiresEvidence: true,
     checklist: [
-      { id: 'c1', text: 'Pick doors according to loading plan sequence' },
-      { id: 'c2', text: 'Ensure protective foam and corner guards are intact' },
-      { id: 'c3', text: 'Stage products in QC inspection bay in readiness for rolling batch checks' },
-      { id: 'c4', text: 'Notify QC Inspector as each 10-door batch is staged' }
+      { id: 'c1', text: 'Pick assigned steel door models and verify product details' },
+      { id: 'c2', text: 'Inspect physical product condition for dents or surface blemishes' },
+      { id: 'c3', text: 'Check protective corners, edge wrapping, and stretch-film protection' },
+      { id: 'c4', text: 'Record completed picked quantity and upload work photographs' },
+      { id: 'c5', text: 'Report missing or damaged items as operational task blockers' }
     ],
-    instructions: 'Physical door picking. Continuous rolling handovers to QC inspection bay.',
+    instructions: 'Physical door picking execution. Continuous progress updates and photo evidence required.',
+    active: true
+  },
+  {
+    id: 'tpl_wh_staging',
+    title: 'Warehouse Staging & Dispatch Lane Organization',
+    departmentId: 'warehouse',
+    departmentName: 'Warehouse',
+    targetDesignation: 'Warehouse Supervisor',
+    category: 'SOP Scheduled Task',
+    priority: 'High',
+    scheduleType: 'daily',
+    startTime: '02:30 PM',
+    deadlineTime: '04:15 PM',
+    requiresApproval: true,
+    requiresEvidence: true,
+    checklist: [
+      { id: 'c1', text: 'Arrange assigned picked products in designated staging bays' },
+      { id: 'c2', text: 'Organize doors by route sequence and transport vehicle allocation' },
+      { id: 'c3', text: 'Coordinate team members and monitor lane clearance' },
+      { id: 'c4', text: 'Upload completion photographs of organized staging bays' },
+      { id: 'c5', text: 'Report any lane congestion or staging delays as operational blockers' }
+    ],
+    instructions: 'Dispatch staging lane management. Maintain clean flow from picking racks to loading bays.',
+    active: true
+  },
+  {
+    id: 'tpl_wh_qc_handover',
+    title: 'QC Handover Coordination & Staging Bay Release',
+    departmentId: 'warehouse',
+    departmentName: 'Warehouse',
+    targetDesignation: 'Warehouse Supervisor',
+    category: 'SOP Scheduled Task',
+    priority: 'Critical',
+    scheduleType: 'daily',
+    startTime: '03:30 PM',
+    deadlineTime: '04:30 PM',
+    requiresApproval: true,
+    requiresEvidence: true,
+    checklist: [
+      { id: 'c1', text: 'Coordinate physical batch handover to the QC inspection team' },
+      { id: 'c2', text: 'Record handover quantity and batch identifier in task notes' },
+      { id: 'c3', text: 'Track handover completion and ensure doors remain in protected bays' },
+      { id: 'c4', text: 'Upload supporting handover photographs' },
+      { id: 'c5', text: 'Record pending handovers and report coordination delays immediately' }
+    ],
+    instructions: 'Coordinate handover to QC team. Note: QC inspection itself is executed by QC; this tracks the warehouse coordination task.',
     active: true
   },
   {
@@ -198,10 +245,12 @@ export const SOP_TASK_TEMPLATES = [
     requiresApproval: true,
     requiresEvidence: true,
     checklist: [
-      { id: 'c1', text: 'Verify 100% QC PASS stamp before loading any door' },
-      { id: 'c2', text: 'Track loading milestones: 20 doors -> 40 doors -> 60 doors -> 70 doors' },
-      { id: 'c3', text: 'Secure doors inside transport vehicles with ratchet straps & buffers' },
-      { id: 'c4', text: 'Complete vehicle loading by 5:45 PM' }
+      { id: 'c1', text: 'Assign vehicle loading responsibilities to Loading Staff crew' },
+      { id: 'c2', text: 'Monitor physical loading activities and verify upright stacking' },
+      { id: 'c3', text: 'Check rubber cushioning and verify tie-down ratchet arrangements' },
+      { id: 'c4', text: 'Track daily milestones: 20 doors -> 40 doors -> 60 doors -> 70 doors' },
+      { id: 'c5', text: 'Upload loading photographs (cargo bay, straps, vehicle registration)' },
+      { id: 'c6', text: 'Record completed loading quantities and submit for supervisor approval' }
     ],
     instructions: 'STRICT SOP RULE: Never load an unapproved or QC-rejected product. Loading must complete by 5:45 PM.',
     active: true
@@ -260,7 +309,7 @@ export const SOP_TASK_TEMPLATES = [
     active: true
   },
   {
-    id: 'tpl_trans_dispatch',
+    id: 'tpl_trans_dispatch_clearance',
     title: 'Dispatch Clearance, Documentation & Vehicle Departure (6:00 PM Deadline)',
     departmentId: 'transportation',
     departmentName: 'Transportation',
@@ -273,12 +322,38 @@ export const SOP_TASK_TEMPLATES = [
     requiresApproval: true,
     requiresEvidence: true,
     checklist: [
-      { id: 'c1', text: 'Verify invoice, delivery challan & e-way bills match loaded count' },
-      { id: 'c2', text: 'Obtain driver sign-off on gate pass' },
-      { id: 'c3', text: 'Record actual departure timestamp in ERP' },
-      { id: 'c4', text: 'Send dispatch notification to recipient dealers' }
+      { id: 'c1', text: 'Coordinate with Warehouse regarding completion of loading tasks' },
+      { id: 'c2', text: 'Verify reported loaded quantities against supplied delivery documents' },
+      { id: 'c3', text: 'Cross-check relevant delivery challan, invoice & e-way bill references' },
+      { id: 'c4', text: 'Confirm required QC PASS evidence is available' },
+      { id: 'c5', text: 'Obtain Driver acknowledgement or signature on gate-pass documents' },
+      { id: 'c6', text: 'Record relevant trip-manifest details & actual departure timestamp' }
     ],
-    instructions: 'Record actual vehicle departure separately from loading completion. Target departure by 6:00 PM.',
+    instructions: 'Coordinate document verification and record actual departure separately from loading completion. Target departure by 6:00 PM.',
+    active: true
+  },
+  {
+    id: 'tpl_trans_delivery',
+    title: 'Transit Delivery, Unloading & Dealer Signed POD Handover',
+    departmentId: 'transportation',
+    departmentName: 'Transportation',
+    targetDesignation: 'Driver',
+    category: 'SOP Scheduled Task',
+    priority: 'High',
+    scheduleType: 'daily',
+    startTime: '06:00 PM',
+    deadlineTime: '09:00 PM',
+    requiresApproval: true,
+    requiresEvidence: true,
+    checklist: [
+      { id: 'c1', text: 'Review assigned destination and delivery route instructions' },
+      { id: 'c2', text: 'Start trip and record transit progress / delays' },
+      { id: 'c3', text: 'Reach assigned destination safely and complete unloading' },
+      { id: 'c4', text: 'Inspect for visible transit damage and report if identified' },
+      { id: 'c5', text: 'Obtain dealer acknowledgment on physical delivery challan' },
+      { id: 'c6', text: 'Capture and upload signed Proof of Delivery (POD) photograph' }
+    ],
+    instructions: 'Follow safe unloading protocols. Mandatory signed POD photo proof required before submitting task for Coordinator sign-off.',
     active: true
   },
 

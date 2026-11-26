@@ -3,15 +3,13 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { TASK_STATUSES, TASK_PRIORITIES } from './rbac';
-import { getTodayDateString, getDateOffset } from './dateUtils';
-import { updateFirestoreTask } from './firestoreService';
-import { deleteDoc, doc } from 'firebase/firestore';
+import { getTodayDateString, getDateOffset, isDailyWorkLogLocked, isTodayLogWindowOpen } from './dateUtils';
+import { updateFirestoreTask, deleteFirestoreTask } from './firestoreService';
 import { db } from './firebase';
 import { useToast } from './ToastContext';
 
 // Modular Sub-components
 import TasksHeader from './TasksHeader';
-import TaskStatsStrip from './TaskStatsStrip';
 import TasksToolbar from './TasksToolbar';
 import TasksTable from './TasksTable';
 import TaskDrawer from './TaskDrawer';
@@ -128,8 +126,10 @@ export default function TaskPulseTeamView({
       const taskAssigneeId = String(task.assignedToId || task.assignedTo || '');
       const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds.map(String) : [];
       const taskAssigneeName = String(task.assignedToName || '').toLowerCase();
+      const taskDriverId = String(task.assignedDriverId || task.driverId || '');
       const isMine = currentUserAliases.has(taskAssigneeId) ||
                      taskAssigneeIds.some(id => currentUserAliases.has(id)) ||
+                     (taskDriverId && currentUserAliases.has(taskDriverId)) ||
                      (currentUserName && taskAssigneeName.includes(currentUserName));
       if (!isMine) return false;
       const taskDateVal = task.date || task.taskDate || task.deadlineDate;
@@ -152,13 +152,18 @@ export default function TaskPulseTeamView({
         const byName = String(task.assignedByName || '').toLowerCase();
         const isAssignedByMe = currentUserAliases.has(byId) || (currentUserName && byName.includes(currentUserName));
         if (!isAssignedByMe) return false;
+      } else if (viewMode === 'all_tasks') {
+        // Task Directory: Display all scoped tasks
+        return true;
       } else {
         // My Tasks View
         const taskAssigneeId = String(task.assignedToId || task.assignedTo || '');
         const taskAssigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds.map(String) : [];
         const taskAssigneeName = String(task.assignedToName || '').toLowerCase();
+        const taskDriverId = String(task.assignedDriverId || task.driverId || '');
         const isMine = currentUserAliases.has(taskAssigneeId) ||
                        taskAssigneeIds.some(id => currentUserAliases.has(id)) ||
+                       (taskDriverId && currentUserAliases.has(taskDriverId)) ||
                        (currentUserName && taskAssigneeName.includes(currentUserName));
         if (!isMine) return false;
       }
@@ -309,6 +314,12 @@ export default function TaskPulseTeamView({
 
   // Delete Task
   const handleDeleteTask = async (task) => {
+    const taskDate = task.taskDate || task.date || task.deadlineDate;
+    if (isDailyWorkLogLocked(taskDate)) {
+      showToast("Today's work log is locked. Entries can no longer be modified.", 'error');
+      return;
+    }
+
     const confirmed = await confirm({
       title: 'Delete Task',
       message: `Are you sure you want to delete "${task.title}"? This cannot be undone.`,
@@ -318,11 +329,11 @@ export default function TaskPulseTeamView({
     if (!confirmed) return;
 
     try {
-      await deleteDoc(doc(db, 'tasks', task.id));
+      await deleteFirestoreTask(task.id, currentUser);
       showToast('Task deleted successfully');
     } catch (err) {
       console.error('Delete error:', err);
-      showToast('Failed to delete task', 'error');
+      showToast(err.message || 'Failed to delete task', 'error');
     }
   };
 
@@ -382,6 +393,16 @@ export default function TaskPulseTeamView({
     }
   };
 
+  const isTodayLocked = !isTodayLogWindowOpen();
+
+  const handleOpenAddWork = () => {
+    if (isTodayLocked) {
+      showToast("Today's work log is locked. Entries can no longer be modified.", 'error');
+      return;
+    }
+    setIsAddWorkOpen(true);
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16 font-sans">
       
@@ -389,23 +410,40 @@ export default function TaskPulseTeamView({
       <TasksHeader
         viewMode={viewMode}
         onViewModeChange={setViewMode}
-        todayCount={todayMyTasksCount}
+        isAllTasks={viewMode === 'all_tasks'}
+        todayCount={viewMode === 'all_tasks' ? tasks.length : todayMyTasksCount}
         assignedByMeCount={assignedByMeTasks.length}
         salesLinkedCount={salesLinkedTasks.length}
         marketingRequestsCount={marketingRequests.length}
-        canSeeSalesLinked={canSeeSalesLinked}
-        canSeeMarketingRequests={canSeeMarketingRequests}
-        onOpenAddWork={() => setIsAddWorkOpen(true)}
+        canSeeSalesLinked={canSeeSalesLinked && viewMode !== 'all_tasks'}
+        canSeeMarketingRequests={canSeeMarketingRequests && viewMode !== 'all_tasks'}
+        onOpenAddWork={handleOpenAddWork}
+        isTodayLocked={isTodayLocked}
       />
 
-      {/* 2. Summary Stat Strip (Quick Status Filter) */}
-      <TaskStatsStrip
-        tasks={filteredTasks}
-        currentStatusFilter={statusFilter}
-        onSelectStatusFilter={setStatusFilter}
-      />
+      {/* 1b. Cutoff Lock Warning Banner when today is past 11:59 PM */}
+      {isTodayLocked && (
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+              <span className="text-base font-bold text-amber-800">🔒</span>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-amber-900">
+                Today's work log is locked. Entries can no longer be modified.
+              </p>
+              <p className="text-[11px] text-amber-700">
+                The 11:59 PM daily cutoff has passed. Previous entries are preserved in read-only mode, and new logs will open with the next business day.
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full bg-amber-200/80 text-amber-900 shrink-0">
+            Locked at 11:59 PM
+          </span>
+        </div>
+      )}
 
-      {/* 3. Toolbar (Segmented Date, Search, Selects, Group toggle, Reset) */}
+      {/* 2. Toolbar (Segmented Date, Search, Selects, Group toggle, Reset) */}
       <TasksToolbar
         dateFilter={dateFilter}
         onDateFilterChange={setDateFilter}
@@ -432,12 +470,18 @@ export default function TaskPulseTeamView({
         onLoadMore={() => setVisibleCount(prev => prev + 25)}
         onToggleComplete={handleToggleTaskComplete}
         onStatusChange={handleStatusChange}
-        onOpenDetails={(task) => setDrawerTask(task)}
+        onOpenDetails={(task) => {
+          if (onOpenTaskDetails) {
+            onOpenTaskDetails(task);
+          } else {
+            setDrawerTask(task);
+          }
+        }}
         onSplitTask={handleSplitTask}
         onDeleteTask={handleDeleteTask}
         onDuplicateTask={handleDuplicateTask}
         onReassignTask={handleReassignTask}
-        onOpenAddWork={() => setIsAddWorkOpen(true)}
+        onOpenAddWork={handleOpenAddWork}
       />
 
       {/* 5. Right-side Task Detail Drawer */}

@@ -13,16 +13,31 @@ export function canAccessSales(user) {
 
   return (
     dept === 'sales' ||
+    dept === 'finance' ||
+    dept === 'accounts' ||
+    dept === 'warehouse' ||
+    dept === 'operations' ||
+    dept === 'transportation' ||
+    dept === 'transport' ||
     role === 'CSO' ||
     role === 'SSM' ||
     role === 'ASM' ||
-    role === 'Sales Coordinator'
+    role === 'Sales Coordinator' ||
+    role === 'Accounts Manager' ||
+    role === 'Accountant' ||
+    role === 'Junior Accountant' ||
+    role === 'Warehouse In-charge' ||
+    role === 'Warehouse Supervisor' ||
+    role === 'Transport Manager' ||
+    role === 'Transport Coordinator' ||
+    role === 'Driver' ||
+    role === 'Delivery Partner'
   );
 }
 
 /**
  * Returns the scope level for a Sales user:
- * - 'ALL': Executive Director, Director Operations, General Manager, HR Manager, CSO
+ * - 'ALL': Executive Director, Director Operations, General Manager, HR Manager, CSO, Finance/Accounts, Warehouse & Transport In-charge
  * - 'ZONE': State Sales Manager (SSM)
  * - 'TERRITORY': Assistant Sales Manager (ASM)
  * - 'OWN': Sales Coordinator
@@ -31,7 +46,10 @@ export function getSalesScope(user) {
   if (!user) return 'OWN';
   if (canViewAll(user) || isGlobalManager(user)) return 'ALL';
 
+  const dept = (user.department || user.departmentId || '').toLowerCase();
   const role = normalizeRole(user.role || '');
+  if (dept === 'finance' || dept === 'accounts' || role === 'Accounts Manager' || role === 'Accountant' || role === 'Junior Accountant') return 'ALL';
+  if (dept === 'warehouse' || dept === 'operations' || dept === 'transportation' || dept === 'transport' || role === 'Warehouse In-charge' || role === 'Warehouse Supervisor' || role === 'Transport Manager' || role === 'Transport Coordinator' || role === 'Driver' || role === 'Delivery Partner') return 'ALL';
   if (role === 'CSO') return 'ALL';
   if (role === 'SSM') return 'ZONE';
   if (role === 'ASM') return 'TERRITORY';
@@ -51,9 +69,9 @@ export function canSalesAssignTo(assigner, assignee, allEmployees = []) {
   const assignerRole = normalizeRole(assigner.role || '');
   const assigneeRole = normalizeRole(assignee.role || '');
 
-  // 1. CSO can assign tasks to ANYONE who they want
+  // 1. CSO can assign tasks ONLY to Sales Downline (SSM, ASM, Sales Coordinator)
   if (assignerRole === 'CSO') {
-    return true;
+    return ['SSM', 'ASM', 'Sales Coordinator'].includes(assigneeRole);
   }
 
   const assignerId = String(assigner.id || assigner.uid || assigner.employeeId || '');
@@ -156,10 +174,24 @@ export function filterDealersByScope(dealers = [], user, allEmployees = []) {
 }
 
 /**
- * Filters dealer bookings according to the user's Sales scope
+ * Filters dealer bookings according to the user's Sales and Departmental scope
+ * - Transportation personnel (Transport Manager, Coordinator, Drivers): ONLY see bookings that are confirmed/picked ('Picked', 'Dispatched', 'Completed')
+ * - Sales, Finance and Management: see bookings according to regional/hierarchical scope
  */
 export function filterBookingsByScope(bookings = [], user, allEmployees = []) {
   if (!bookings) return [];
+  if (!user) return [];
+
+  const dept = (user.department || user.departmentId || '').toLowerCase();
+  const role = normalizeRole(user.role || '');
+  const isTransport = dept === 'transportation' || dept === 'transport' ||
+                      ['Transport Manager', 'Transport Coordinator', 'Driver', 'Delivery Partner'].includes(role);
+
+  // Transportation only sees orders that are verified & picked by warehouse, ready for dispatch
+  if (isTransport) {
+    return bookings.filter(b => b.status === 'Picked' || b.status === 'Dispatched' || b.status === 'Completed');
+  }
+
   const scope = getSalesScope(user);
 
   if (scope === 'ALL') {

@@ -22,12 +22,12 @@ export function useEmployeeStats(employeeId, rangeDays = 30) {
     setIsLoading(true);
     setError(null);
 
-    // Compute cutoff timestamp for requested range
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - Number(rangeDays));
-    cutoffDate.setHours(0, 0, 0, 0);
-    const cutoffIso = cutoffDate.toISOString();
-    const cutoffDateStr = cutoffDate.toISOString().slice(0, 10);
+    // Compute boundary timestamp for requested range
+    const rangeStartDate = new Date();
+    rangeStartDate.setDate(rangeStartDate.getDate() - Number(rangeDays));
+    rangeStartDate.setHours(0, 0, 0, 0);
+    const rangeStartIso = rangeStartDate.toISOString();
+    const rangeStartDateStr = rangeStartDate.toISOString().slice(0, 10);
 
     // Query employee tasks in range
     const empIdStr = String(employeeId);
@@ -47,7 +47,7 @@ export function useEmployeeStats(employeeId, rangeDays = 30) {
           const data = docSnap.data();
           const taskDate = data.dueDate || data.date || data.createdAt?.toDate?.()?.toISOString() || data.createdAt || '';
           // Filter tasks within the range window or open/ongoing
-          if (!data.dueDate || taskDate >= cutoffDateStr || taskDate >= cutoffIso || data.status !== 'completed') {
+          if (!data.dueDate || taskDate >= rangeStartDateStr || taskDate >= rangeStartIso || data.status !== 'completed') {
             list.push({ id: docSnap.id, ...data });
           }
         });
@@ -67,7 +67,7 @@ export function useEmployeeStats(employeeId, rangeDays = 30) {
       const allRecent = [];
       snap.forEach(d => {
         const dt = d.data();
-        if (dt.dueDate >= cutoffDateStr || dt.date >= cutoffDateStr) {
+        if (dt.dueDate >= rangeStartDateStr || dt.date >= rangeStartDateStr) {
           allRecent.push({ id: d.id, ...dt });
         }
       });

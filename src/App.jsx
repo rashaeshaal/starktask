@@ -44,9 +44,11 @@ import CompanyDashboardView from './CompanyDashboardView';
 import OrganizationManagementView from './OrganizationManagementView';
 import TeamManagementView from './TeamManagementView';
 import TaskPulseTeamView from './TaskPulseTeamView';
+import MyTasksPage from './components/tasks/MyTasksPage';
 import AddEmployeeModal from './AddEmployeeModal';
 import SopTemplatesView from './SopTemplatesView';
 import EscalationsView from './EscalationsView';
+import TodoReminderView from './TodoReminderView';
 import TodoReminders from './TodoReminders';
 import { useToast } from './ToastContext';
 import TeamPerformanceView from './TeamPerformanceView';
@@ -180,7 +182,7 @@ export default function App() {
     if (!activeEmployee) return;
 
     // Use current activeEmployee identifier as stable trigger to prevent re-attaching listeners
-    const unsubTasks = subscribeToTasks(activeEmployee, setTasks, employees);
+    const unsubTasks = subscribeToTasks(activeEmployee, setTasks, employees.length > 0 ? employees : ENTERPRISE_EMPLOYEE_DIRECTORY);
     const unsubNotifs = subscribeToNotifications(activeEmployee.id || activeEmployee.uid, setNotifications);
 
     return () => {
@@ -242,30 +244,20 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Review Queue (Tasks completed / submitted that were assigned BY this user)
+  // Review Queue (Tasks completed / submitted waiting for sign-off)
+  // Enforces direct reporting manager approverId match and self-approval block
   const pendingApprovals = useMemo(() => {
     if (!activeEmployee) return [];
-    const myId = String(activeEmployee.id || activeEmployee.uid || '');
-    const myEmpId = activeEmployee.employeeId ? String(activeEmployee.employeeId) : '';
-    const myName = String(activeEmployee.fullName || activeEmployee.name || '').toLowerCase();
-
     return tasks.filter(t => {
       // 1. Task must be finished by the assignee (Pending Review, Pending Sign-Off, or Completed waiting for sign-off)
       const s = (t.status || '').toLowerCase();
       const isSubmitted = s === 'pending review' || s === 'pending sign-off' || s === 'completed';
       if (!isSubmitted) return false;
 
-      // 2. Strict assigner check: Only the person who assigned the task sees it in their approval page
-      const byId = String(t.assignedById || t.createdById || '');
-      const byName = String(t.assignedByName || '').toLowerCase();
-
-      const wasAssignedByMe = (myId && byId === myId) || 
-                              (myEmpId && byId === myEmpId) || 
-                              (myName && byName === myName);
-
-      return wasAssignedByMe;
+      // 2. Direct reporting manager check with strict self-approval exclusion
+      return canApproveTask(activeEmployee, t, employees);
     });
-  }, [tasks, activeEmployee]);
+  }, [tasks, activeEmployee, employees]);
 
   // Active escalations count
   const escalationsCount = tasks.filter(t => 
@@ -342,6 +334,18 @@ export default function App() {
     try {
       await createFirestoreTask(newTaskData, activeEmployee);
       showToast('Task created and assigned successfully!', 'success');
+      // Smooth navigation on submit:
+      // If task is assigned to currentUser or self-work, navigate to My Tasks;
+      // otherwise, navigate to Tasks Directory or My Tasks based on permissions.
+      const assignedId = String(newTaskData.assignedToId || newTaskData.assignedTo || '');
+      const myId = String(activeEmployee?.id || activeEmployee?.uid || activeEmployee?.employeeId || '');
+      if (assignedId === myId || newTaskData.isSelfLogged) {
+        navigateToTabSafe('my_tasks');
+      } else if (canAccess(activeEmployee, PAGES.ALL_TASKS)) {
+        navigateToTabSafe('all_tasks');
+      } else {
+        navigateToTabSafe('my_tasks');
+      }
     } catch (err) {
       console.error('Failed to create task in Firestore:', err);
       showToast('Error creating task: ' + err.message, 'error');
@@ -443,7 +447,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-row">
+    <div className="min-h-screen bg-[#F5F7FA] text-[#172B4D] font-sans flex flex-row">
 
       {/* 1. Left Navigation Sidebar (In-flow fixed width column on desktop, NO double margin) */}
       <Sidebar
@@ -471,32 +475,23 @@ export default function App() {
       {/* 2. Main Content Wrapper: flex-1 min-w-0, full height */}
       <div className="flex-1 min-w-0 flex flex-col">
         
-        {/* Mobile Header Bar (lg:hidden) */}
-        <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between sticky top-0 z-30 shadow-2xs">
+        {/* Mobile-Only Drawer Toggle Button */}
+        <div className="lg:hidden p-3 pb-0 flex items-center justify-between">
           <button
             onClick={() => setIsMobileSidebarOpen(true)}
-            className="w-8 h-8 rounded-xl bg-[#05331F] text-emerald-300 flex items-center justify-center font-bold shrink-0 shadow-xs cursor-pointer"
+            className="w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold shadow-2xs transition cursor-pointer"
             aria-label="Open Navigation"
           >
             <Menu className="w-4 h-4" />
           </button>
-          
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-800 tracking-wider">STARK STEEL</span>
-          </div>
-
-          <button
-            onClick={() => logout()}
-            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl"
-            title="Logout"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
+          <span className="text-xs font-semibold text-slate-900 capitalize">
+            {activeTab.replace('_', ' ')}
+          </span>
         </div>
 
         {/* Global Announcement Banner */}
         {announcements.length > 0 && (
-          <div className="bg-[#05331F] text-white px-4 sm:px-6 lg:px-8 py-2.5 text-xs flex items-center justify-between border-b border-[#07472B] w-full">
+          <div className="bg-[#05331F] text-white px-4 sm:px-6 lg:px-8 py-2 text-xs flex items-center justify-between border-b border-[#07472B] w-full">
             <div className="w-full flex items-center justify-between">
               <div className="flex items-center gap-2 truncate">
                 <Megaphone className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -556,6 +551,7 @@ export default function App() {
                 bookings={dealerBookings}
                 dealers={dealers}
                 employees={employees}
+                tasks={tasks}
                 onOpenAssignOrderModal={(preset) => {
                   setAssignModalPreset(preset);
                   setIsAssignModalOpen(true);
@@ -651,54 +647,83 @@ export default function App() {
                 </div>
 
                 {pendingApprovals.length === 0 ? (
-                  <div className="bg-white rounded-2xl p-10 text-center border border-slate-200 text-slate-400 space-y-2">
+                  <div className="bg-white rounded-2xl p-10 text-center border border-slate-200 text-slate-400 space-y-3">
                     <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500/50" />
                     <p className="font-semibold text-sm text-slate-600">All submissions are reviewed!</p>
-                    <p className="text-xs">No pending sign-offs waiting for your account right now.</p>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto">
+                      No pending sign-offs waiting for your approval right now. Newly assigned tasks appear under <strong>My Tasks</strong> or on your <strong>Dashboard</strong> until completed and submitted by staff for sign-off.
+                    </p>
+                    <div className="pt-2 flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => navigateToTabSafe('dashboard')}
+                        className="px-3.5 py-1.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white text-xs font-semibold transition"
+                      >
+                        Go to Dashboard
+                      </button>
+                      <button
+                        onClick={() => navigateToTabSafe('my_tasks')}
+                        className="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-semibold transition"
+                      >
+                        View My Tasks
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {pendingApprovals.map(t => (
-                      <div key={t.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-semibold bg-slate-100 px-2 py-0.5 rounded text-slate-700">
-                            {t.departmentName || t.department || 'Sales'}
-                          </span>
-                          <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full border border-amber-200">
-                            Pending Sign-Off
-                          </span>
+                    {pendingApprovals.map(t => {
+                      const waitingHours = t.lastUpdated || t.completedAt ? Math.round((Date.now() - new Date(t.lastUpdated || t.completedAt).getTime()) / (1000 * 60 * 60)) : 0;
+                      const isWaitingLong = waitingHours >= 24;
+
+                      return (
+                        <div key={t.id} className={`bg-white p-5 rounded-2xl border shadow-2xs space-y-3 ${isWaitingLong ? 'border-amber-300 ring-1 ring-amber-300/40 bg-amber-50/20' : 'border-slate-200'}`}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-semibold bg-slate-100 px-2 py-0.5 rounded text-slate-700">
+                              {t.departmentName || t.department || 'Sales'}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {isWaitingLong && (
+                                <span className="text-[10px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300">
+                                  Waiting &gt;24h ({waitingHours}h)
+                                </span>
+                              )}
+                              <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full border border-amber-200">
+                                Pending Sign-Off
+                              </span>
+                            </div>
+                          </div>
+
+                          <h3 className="font-bold text-sm text-slate-900">{t.title}</h3>
+                          <p className="text-xs text-slate-600">{t.description}</p>
+
+                          <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs space-y-1">
+                            <div className="text-slate-500">Assignee: <span className="font-semibold text-slate-800">{t.assignedToName}</span></div>
+                            <div className="text-slate-500">Approver: <span className="font-semibold text-emerald-800">{activeEmployee.fullName || activeEmployee.name} (You)</span></div>
+                            {t.submissionNotes && (
+                              <div className="text-slate-700 italic">"{t.submissionNotes}"</div>
+                            )}
+                          </div>
+
+                          <div className="pt-2 flex items-center justify-between">
+                            <button
+                              onClick={() => handleFollowUpTask(t)}
+                              className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-[#05331F] font-semibold"
+                              title="Bookmark follow-up in my to-dos"
+                            >
+                              <Bookmark className="w-3.5 h-3.5" />
+                              <span>Add to My Planner</span>
+                            </button>
+
+                            <button
+                              onClick={() => setSelectedTaskForApproval(t)}
+                              className="flex items-center gap-1.5 px-4 py-2 bg-[#05331F] hover:bg-[#07472B] text-white rounded-xl text-xs font-bold shadow-2xs transition"
+                            >
+                              <span>Review & Decide</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
-
-                        <h3 className="font-bold text-sm text-slate-900">{t.title}</h3>
-                        <p className="text-xs text-slate-600">{t.description}</p>
-
-                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs space-y-1">
-                          <div className="text-slate-500">Assignee: <span className="font-semibold text-slate-800">{t.assignedToName}</span></div>
-                          {t.submissionNotes && (
-                            <div className="text-slate-700 italic">"{t.submissionNotes}"</div>
-                          )}
-                        </div>
-
-                        <div className="pt-2 flex items-center justify-between">
-                          <button
-                            onClick={() => handleFollowUpTask(t)}
-                            className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-[#05331F] font-semibold"
-                            title="Bookmark follow-up in my to-dos"
-                          >
-                            <Bookmark className="w-3.5 h-3.5" />
-                            <span>Add to My Planner</span>
-                          </button>
-
-                          <button
-                            onClick={() => setSelectedTaskForApproval(t)}
-                            className="flex items-center gap-1.5 px-4 py-2 bg-[#05331F] hover:bg-[#07472B] text-white rounded-xl text-xs font-bold shadow-2xs transition"
-                          >
-                            <span>Review & Decide</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -734,13 +759,19 @@ export default function App() {
 
             {/* VIEW 6: To-Do & Reminders (Personal Planner) */}
             {activeTab === 'todos' && canAccess(activeEmployee, PAGES.TODOS) && (
-              <TodoReminders
+              <TodoReminderView
                 currentUser={activeEmployee}
-                onOpenAssignModal={(preset) => {
-                  setAssignModalPreset(preset);
+                departments={departments}
+                employees={employees}
+                onConvertToOfficialTask={(preset) => {
+                  setAssignModalPreset({
+                    title: preset.title,
+                    description: preset.description,
+                    priority: preset.priority || TASK_PRIORITIES.MEDIUM,
+                    deadlineDate: preset.deadlineDate || getTodayDateString()
+                  });
                   setIsAssignModalOpen(true);
                 }}
-                onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
               />
             )}
 
@@ -754,7 +785,7 @@ export default function App() {
             )}
 
             {/* VIEW 8: All Tasks & Pulse View */}
-            {activeTab === 'my_tasks' && canAccess(activeEmployee, PAGES.MY_TASKS) && (
+            {activeTab === 'all_tasks' && canAccess(activeEmployee, PAGES.ALL_TASKS) && (
               <TaskPulseTeamView
                 tasks={tasks}
                 employees={employees}
@@ -762,12 +793,31 @@ export default function App() {
                 teamMembers={teamMembers}
                 departments={departments}
                 currentUser={activeEmployee}
+                initialViewMode="all_tasks"
+                onTaskCreated={handleTaskCreated}
+                onTaskUpdated={handleTaskUpdated}
+                onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
+                onOpenAssignModal={() => setIsAssignModalOpen(true)}
+                onFollowUpTask={handleFollowUpTask}
+              />
+            )}
+
+            {activeTab === 'my_tasks' && canAccess(activeEmployee, PAGES.MY_TASKS) && (
+              <MyTasksPage
+                tasks={tasks}
+                employees={employees}
+                teams={teams}
+                departments={departments}
+                currentUser={activeEmployee}
+                userTodos={userTodos}
                 initialViewMode="my_tasks"
                 onTaskCreated={handleTaskCreated}
                 onTaskUpdated={handleTaskUpdated}
                 onOpenTaskDetails={(task) => setSelectedTaskForExec(task)}
                 onOpenAssignModal={() => setIsAssignModalOpen(true)}
                 onFollowUpTask={handleFollowUpTask}
+                onToggleTodoDone={handleToggleTodoDone}
+                onQuickAddTodo={handleDashboardQuickAddTodo}
               />
             )}
 
@@ -1120,22 +1170,30 @@ export default function App() {
       />
 
       {/* Task Execution Modal */}
-      <TaskExecutionModal
-        isOpen={!!selectedTaskForExec}
-        onClose={() => setSelectedTaskForExec(null)}
-        task={selectedTaskForExec}
-        currentUser={activeEmployee}
-        onTaskUpdated={handleTaskUpdated}
-      />
+      {selectedTaskForExec && (
+        <TaskExecutionModal
+          isOpen={true}
+          onClose={() => setSelectedTaskForExec(null)}
+          task={selectedTaskForExec}
+          currentUser={activeEmployee}
+          allEmployees={employees}
+          allTasks={tasks}
+          bookings={dealerBookings}
+          onTaskUpdated={handleTaskUpdated}
+        />
+      )}
 
       {/* Supervisor Approval Modal */}
-      <SupervisorApprovalModal
-        isOpen={!!selectedTaskForApproval}
-        onClose={() => setSelectedTaskForApproval(null)}
-        task={selectedTaskForApproval}
-        currentUser={activeEmployee}
-        onApprovalDecided={handleTaskUpdated}
-      />
+      {selectedTaskForApproval && (
+        <SupervisorApprovalModal
+          isOpen={true}
+          onClose={() => setSelectedTaskForApproval(null)}
+          task={selectedTaskForApproval}
+          currentUser={activeEmployee}
+          allEmployees={employees}
+          onApprovalDecided={handleTaskUpdated}
+        />
+      )}
 
       {/* Add Employee Modal */}
       <AddEmployeeModal

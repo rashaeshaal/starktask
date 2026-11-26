@@ -20,6 +20,9 @@ import {
 } from './permissions';
 import { canAccessSales } from './salesPermissions';
 import { formatName, formatDepartment } from './orgHelpers';
+import WarehouseDashboardView from './components/warehouse/WarehouseDashboardView';
+import TransportationDashboardView from './components/transportation/TransportationDashboardView';
+import DashboardKPICard from './components/common/DashboardKPICard';
 
 function getGreeting(name) {
   const hour = new Date().getHours();
@@ -67,7 +70,13 @@ export default function CompanyDashboardView({
   // Operations Role Heuristics
   const isOperationsHead = userRole === 'Operations Head';
   const isWarehouseInCharge = userRole === 'Warehouse In-charge';
+  const isWarehouseSupervisor = userRole === 'Warehouse Supervisor' || userRole === 'Warehouse Executive';
+  const isLoadingStaff = userRole === 'Loading Staff';
+  const isWarehouseDepartmentRole = (userDept === 'warehouse' || isWarehouseInCharge || isWarehouseSupervisor || isLoadingStaff);
   const isTransportManager = userRole === 'Transport Manager';
+  const isTransportCoordinator = userRole === 'Transport Coordinator';
+  const isDriver = userRole === 'Driver' || userRole === 'Delivery Partner';
+  const isTransportationDepartmentRole = (userDept === 'transportation' || userDept === 'trans' || isTransportManager || isTransportCoordinator || isDriver);
   const isServiceManager = userRole === 'Service Manager';
   const isInventorySupervisor = userRole === 'Inventory Supervisor';
 
@@ -101,9 +110,19 @@ export default function CompanyDashboardView({
       return tasks;
     }
     const idSet = new Set(visibleUserIds.map(String));
+    // Also include currentUser aliases
+    if (currentUser?.id) idSet.add(String(currentUser.id));
+    if (currentUser?.uid) idSet.add(String(currentUser.uid));
+    if (currentUser?.employeeId) {
+      idSet.add(String(currentUser.employeeId));
+      idSet.add(`emp_${currentUser.employeeId}`);
+    }
+
     return tasks.filter(t => {
       const assignedId = String(t.assignedToId || t.assignedTo || '');
-      const isMine = idSet.has(assignedId);
+      const driverId = String(t.assignedDriverId || t.driverId || '');
+      const taskAssigneeIds = Array.isArray(t.assigneeIds) ? t.assigneeIds.map(String) : [];
+      const isMine = idSet.has(assignedId) || (driverId && idSet.has(driverId)) || taskAssigneeIds.some(id => idSet.has(id));
       // For Brand Manager: include marketing requests
       const isMktReq = isBrandManager && (t.isMarketingRequest || t.category === 'Marketing Request');
       // For Operations Head: include all operations branch tasks
@@ -442,6 +461,36 @@ export default function CompanyDashboardView({
     return teamPerformanceData.filter(t => t.id === selectedPerfTeamId);
   }, [selectedPerfTeamId, teamPerformanceData]);
 
+  // If user belongs to Warehouse department (Warehouse In-charge, Supervisor, Loading Staff), render specialized Warehouse Dashboard
+  if (isWarehouseDepartmentRole && !isOperationsHead) {
+    return (
+      <WarehouseDashboardView
+        tasks={tasks}
+        currentUser={currentUser}
+        employees={employees}
+        bookings={bookings}
+        onOpenTaskDetails={onOpenTaskDetails}
+        onOpenAssignModal={onOpenAssignModal}
+        onNavigateToTab={onNavigateToTab}
+      />
+    );
+  }
+
+  // If user belongs to Transportation department (Transport Manager, Coordinator, Drivers), render specialized Transportation Dashboard
+  if (isTransportationDepartmentRole && !isOperationsHead) {
+    return (
+      <TransportationDashboardView
+        tasks={tasks}
+        currentUser={currentUser}
+        employees={employees}
+        bookings={bookings}
+        onOpenTaskDetails={onOpenTaskDetails}
+        onOpenAssignModal={onOpenAssignModal}
+        onNavigateToTab={onNavigateToTab}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       
@@ -456,12 +505,22 @@ export default function CompanyDashboardView({
           </p>
         </div>
 
-        {/* Action shortcut: Add today's work */}
+        {/* Action shortcut: Assign Task & Team Performance */}
         <div className="flex items-center gap-2">
+          {onOpenAssignModal && (
+            <button
+              onClick={onOpenAssignModal}
+              className="px-3.5 py-2 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Assign Task</span>
+            </button>
+          )}
+
           {canAccess(currentUser, PAGES.TEAM_PERFORMANCE) && (
             <button
               onClick={() => onNavigateToTab && onNavigateToTab('team_performance')}
-              className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
+              className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition bg-white"
             >
               <BarChart2 className="w-3.5 h-3.5 text-slate-500" />
               <span>Team Performance</span>
@@ -470,71 +529,43 @@ export default function CompanyDashboardView({
         </div>
       </div>
 
-      {/* 2. Top Metric Cards (Total, Completed, Pending, Overdue) - Compact Sleek Design */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        
-        {/* Card 1: Total Tasks Today */}
-        <div className="bg-white px-3.5 py-3 rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-slate-500">Total Tasks</span>
-            <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500">
-              <Layers className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className="text-xl sm:text-2xl font-bold text-slate-900">{totalTasksToday}</span>
-            <span className="text-[10px] text-slate-400 font-medium">today</span>
-          </div>
-          <p className="text-[10px] text-slate-400 truncate mt-0.5">{scopeKpiLabel}</p>
-        </div>
+      {/* 2. Top Metric Cards (Total, Completed, Pending, Overdue) - Premium SaaS Design */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <DashboardKPICard
+          label="Total Tasks"
+          value={totalTasksToday}
+          subtext={scopeKpiLabel}
+          icon={Layers}
+          variant="default"
+          onClick={() => onNavigateToTab && onNavigateToTab('all_tasks')}
+        />
 
-        {/* Card 2: Completed Today */}
-        <div className="bg-white px-3.5 py-3 rounded-xl border border-slate-200/90 shadow-2xs hover:border-emerald-300 transition">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-slate-500">Completed</span>
-            <div className="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-700">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className="text-xl sm:text-2xl font-bold text-[#05331F]">{completedToday}</span>
-            <span className="text-[10px] font-semibold text-emerald-700">({completionPct}%)</span>
-          </div>
-          <p className="text-[10px] text-slate-400 truncate mt-0.5">{completionPct}% finished</p>
-        </div>
+        <DashboardKPICard
+          label="Completed"
+          value={completedToday}
+          subtext={`${completionPct}% finished today`}
+          icon={CheckCircle2}
+          variant="success"
+          onClick={() => onNavigateToTab && onNavigateToTab('all_tasks')}
+        />
 
-        {/* Card 3: Pending / In Progress */}
-        <div className="bg-white px-3.5 py-3 rounded-xl border border-slate-200/90 shadow-2xs hover:border-amber-300 transition">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-slate-500">In Progress</span>
-            <div className="w-6 h-6 rounded-lg bg-amber-50 flex items-center justify-center text-amber-700">
-              <Clock className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className="text-xl sm:text-2xl font-bold text-slate-900">{pendingToday}</span>
-            <span className="text-[10px] text-slate-400 font-medium">remaining</span>
-          </div>
-          <p className="text-[10px] text-slate-400 truncate mt-0.5">Active execution</p>
-        </div>
+        <DashboardKPICard
+          label="In Progress"
+          value={pendingToday}
+          subtext="Active execution"
+          icon={Clock}
+          variant="warning"
+          onClick={() => onNavigateToTab && onNavigateToTab('all_tasks')}
+        />
 
-        {/* Card 4: Overdue Tasks */}
-        <div className="bg-white px-3.5 py-3 rounded-xl border border-slate-200/90 shadow-2xs hover:border-rose-300 transition">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-slate-500">Overdue</span>
-            <div className="w-6 h-6 rounded-lg bg-rose-50 flex items-center justify-center text-rose-700">
-              <AlertTriangle className="w-3.5 h-3.5" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className={`text-xl sm:text-2xl font-bold ${overdueToday > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
-              {overdueToday}
-            </span>
-            <span className="text-[10px] text-slate-400 font-medium">missed</span>
-          </div>
-          <p className="text-[10px] text-slate-400 truncate mt-0.5">Needs attention</p>
-        </div>
-
+        <DashboardKPICard
+          label="Overdue"
+          value={overdueToday}
+          subtext={overdueToday > 0 ? "Requires attention" : "All on schedule"}
+          icon={AlertTriangle}
+          variant={overdueToday > 0 ? "danger" : "default"}
+          onClick={() => onNavigateToTab && onNavigateToTab('all_tasks')}
+        />
       </div>
 
       {/* 2.5 TEAM-BASED EMPLOYEE PERFORMANCE GRAPH & BENCHMARK */}
@@ -897,7 +928,7 @@ export default function CompanyDashboardView({
               <div>
                 <h2 className="text-sm font-bold text-slate-900">Payment Verification Queue</h2>
                 <p className="text-xs text-slate-500">
-                  Sorted by required-by date with active holds prioritized on top
+                  Pending sales payment clearances
                 </p>
               </div>
             </div>
@@ -996,7 +1027,7 @@ export default function CompanyDashboardView({
             <div>
               <h2 className="text-base font-bold text-slate-900">Operations Branches Throughput</h2>
               <p className="text-xs text-slate-500">
-                Sorted by highest operational urgency (overdue & pending execution)
+                Departmental active queues and completion
               </p>
             </div>
             <span className="text-xs bg-emerald-100 text-[#05331F] font-bold px-2.5 py-0.5 rounded-full">
@@ -1208,89 +1239,8 @@ export default function CompanyDashboardView({
         </div>
       )}
 
-      {/* 7. Two-Column Row: My To-Dos & Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Compact "My To-Dos" Card */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <CheckSquare className="w-4 h-4 text-[#05331F]" />
-                <h3 className="font-bold text-sm text-slate-900">My To-Dos</h3>
-              </div>
-              <button
-                onClick={() => onNavigateToTab && onNavigateToTab('todos')}
-                className="text-xs font-semibold text-[#05331F] hover:underline flex items-center gap-0.5"
-              >
-                <span>Planner</span>
-                <ArrowRight className="w-3 h-3" />
-              </button>
-            </div>
-
-            {/* Quick add input */}
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (dashQuickTodo.trim() && onQuickAddTodo) {
-                  onQuickAddTodo(dashQuickTodo.trim());
-                  setDashQuickTodo('');
-                }
-              }}
-              className="flex items-center gap-2 my-3"
-            >
-              <input
-                type="text"
-                placeholder="Add a personal to-do for today..."
-                value={dashQuickTodo}
-                onChange={(e) => setDashQuickTodo(e.target.value)}
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-[#05331F]"
-              />
-              <button
-                type="submit"
-                disabled={!dashQuickTodo.trim()}
-                className="px-3 py-1.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white font-bold text-xs disabled:opacity-40 transition"
-              >
-                Add
-              </button>
-            </form>
-
-            {/* Open to-dos list */}
-            {openTodos.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-4">No open to-dos. You're all clear!</p>
-            ) : (
-              <div className="space-y-2">
-                {openTodos.map(todo => (
-                  <div 
-                    key={todo.id}
-                    onClick={() => onToggleTodoDone && onToggleTodoDone(todo.id, !todo.done)}
-                    className="p-2.5 rounded-xl bg-slate-50/70 hover:bg-slate-100/80 cursor-pointer flex items-center justify-between transition text-xs"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-4 h-4 rounded-md border border-slate-300 flex items-center justify-center bg-white shrink-0">
-                        {todo.done && <Check className="w-3 h-3 text-[#05331F]" />}
-                      </div>
-                      <span className={`truncate font-medium text-slate-800 ${todo.done ? 'line-through text-slate-400' : ''}`}>
-                        {todo.title}
-                      </span>
-                    </div>
-                    {todo.dueAtDate && (
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">
-                        {todo.dueAtDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Private to your account</span>
-            <span>{todos.filter(t => t.done).length} completed</span>
-          </div>
-        </div>
-
+      {/* 7. Recent Operational Activity */}
+      <div className="w-full">
         {/* Recent Operational Highlights Card */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3 flex flex-col justify-between">
           <div>

@@ -19,6 +19,18 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
 
+    // Dealer visit photo proofs (up to 3 images per visit, max 10 MB each)
+    match /tasks/{taskId}/proofs/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+                   && request.resource.size <= 10 * 1024 * 1024
+                   && (
+                     request.resource.contentType.matches('image/.*')
+                     || request.resource.contentType == 'application/pdf'
+                   );
+      allow delete: if isAuthenticated();
+    }
+
     // Finance attachments (Payment slips, Invoices, Bank statements, Reconciliation proofs) up to 10 MB
     match /financeAttachments/{taskId}/{fileName} {
       allow read: if isAuthenticated();

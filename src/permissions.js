@@ -39,6 +39,98 @@ export const SCOPES = {
   SELF: 'self'
 };
 
+export const APPROVER_FALLBACK = 'next-manager-up';
+
+/**
+ * Universal Reporting Manager Approver Resolution Helper
+ * Resolves the direct reporting manager of the task assignee (employee.reportingManagerId of assignedToId at completion)
+ * Fallback routing rules:
+ * - If reporting manager is the assignee or completer, routes to that manager's reporting manager.
+ * - If assignee has no reportingManagerId, or manager is inactive/on leave with stand-in, stand-in becomes approver;
+ *   otherwise routes to next manager up.
+ * - Top of chain (Company Heads): the other active company head approves; with no other head, marked auto-approved.
+ */
+export function resolveTaskApproverId(task, allEmployees = [], leaveCovers = []) {
+  if (!task) return null;
+  const assigneeId = String(task.assignedToId || task.assignedTo || '');
+  const completerId = String(task.completedById || '');
+
+  // 1. Find assignee record
+  const assignee = allEmployees.find(e => String(e.id || e.uid || e.employeeId) === assigneeId);
+  const assigneeRole = normalizeRoleName(assignee?.role || task.assignedToRole || '');
+
+  // 2. Top of Chain Check: Company Heads
+  if (COMPANY_HEAD_ROLES.includes(assigneeRole)) {
+    const otherHead = allEmployees.find(e => {
+      const eId = String(e.id || e.uid || e.employeeId);
+      const isHead = COMPANY_HEAD_ROLES.includes(normalizeRoleName(e.role));
+      const isActive = (e.status || e.employmentStatus) !== 'inactive';
+      return isHead && eId !== assigneeId && isActive;
+    });
+    return otherHead ? String(otherHead.id || otherHead.uid || otherHead.employeeId) : null;
+  }
+
+  // 3. Normal Reporting Manager Resolution
+  let currentMgrId = String(assignee?.reportingManagerId || assignee?.reportsTo || '');
+  const visited = new Set();
+
+  while (currentMgrId) {
+    if (visited.has(currentMgrId)) break;
+    visited.add(currentMgrId);
+
+    const mgr = allEmployees.find(e => String(e.id || e.uid || e.employeeId) === currentMgrId);
+    if (!mgr) break;
+
+    // Check if manager is on leave with active stand-in
+    const todayStr = new Intl.DateTimeFormat('en-CA').format(new Date());
+    const activeCover = leaveCovers.find(c => 
+      String(c.originalManagerId || c.originalEmployeeId) === currentMgrId &&
+      c.status === 'active' &&
+      todayStr >= c.startDate && todayStr <= c.endDate
+    );
+    const effectiveMgrId = activeCover ? String(activeCover.standInEmployeeId || activeCover.standInId) : currentMgrId;
+
+    // Self-approval exclusion: effective manager cannot be assignee or completer
+    if (effectiveMgrId !== assigneeId && effectiveMgrId !== completerId) {
+      return effectiveMgrId;
+    }
+
+    // Ascend to next manager up
+    currentMgrId = String(mgr.reportingManagerId || mgr.reportsTo || '');
+  }
+
+  // Fallback to top leadership if unrouted
+  const fallbackHead = allEmployees.find(e => COMPANY_HEAD_ROLES.includes(normalizeRoleName(e.role)));
+  return fallbackHead ? String(fallbackHead.id || fallbackHead.uid || fallbackHead.employeeId) : null;
+}
+
+/**
+ * Universal Approval Enforcement:
+ * - The only approver of a task is the direct reporting manager (approverId).
+ * - Nobody can approve a task they did the work on: actor cannot be assignedToId or completedById.
+ * - No role has an override (including Company Heads).
+ */
+export function canApproveTask(user, task, allEmployees = [], leaveCovers = []) {
+  if (!user || !task) return false;
+
+  const actorId = String(user.id || user.uid || user.employeeId || '');
+  const assigneeId = String(task.assignedToId || task.assignedTo || '');
+  const completerId = String(task.completedById || '');
+
+  // 1. Strict Self-Approval Ban: cannot approve if actor was assignee or completer
+  if (actorId === assigneeId || (completerId && actorId === completerId)) {
+    return false;
+  }
+
+  // 2. Direct Approver Match
+  const expectedApproverId = task.approverId || resolveTaskApproverId(task, allEmployees, leaveCovers);
+  if (!expectedApproverId) {
+    return false;
+  }
+
+  return actorId === String(expectedApproverId);
+}
+
 export const PAGES = {
   DASHBOARD: 'dashboard',
   TEAM_PERFORMANCE: 'team_performance',
@@ -71,8 +163,29 @@ export function isCompanyHead(userOrRole) {
 }
 
 /**
- * Explicit Standard Permissions List
+ * Shared Sales Head Roles
  */
+export const SALES_HEAD_ROLES = [
+  'Chief Sales Officer',
+  'CSO'
+];
+
+export function isSalesHead(userOrRole) {
+  if (!userOrRole) return false;
+  const role = typeof userOrRole === 'string' ? userOrRole : (userOrRole.role || userOrRole.designation || '');
+  return SALES_HEAD_ROLES.includes(role) || SALES_HEAD_ROLES.includes(normalizeRoleName(role));
+}
+
+/**
+ * Shared helper to check if an employee belongs to the Sales Department
+ * Normalizes via canonical code 'sales' or 'SALES'
+ */
+export function isInSalesDepartment(employee) {
+  if (!employee) return false;
+  const dept = (employee.department || employee.departmentId || '').toLowerCase().trim();
+  const role = normalizeRoleName(employee.role || employee.designation || '');
+  return dept === 'sales' || ['CSO', 'SSM', 'ASM', 'Sales Coordinator'].includes(role);
+}
 export const PERMISSIONS = {
   EMPLOYEE_VIEW: 'employee.view',
   EMPLOYEE_CREATE: 'employee.create',
@@ -90,8 +203,18 @@ export const PERMISSIONS = {
   TEAM_CREATE: 'team.create',
   TEAM_EDIT: 'team.edit',
   TEAM_DELETE: 'team.delete',
+  TEAM_ADD_MEMBER: 'team.addMember',
   TEAM_TRANSFER_MEMBERS: 'team.transferMembers',
   TASK_ASSIGN_ANYONE: 'task.assignAnyone',
+  TASK_VIEW: 'task.view',
+  TASK_ASSIGN: 'task.assign',
+  TASK_REASSIGN: 'task.reassign',
+  TASK_NUDGE: 'task.nudge',
+  APPROVAL_REVIEW: 'approval.review',
+  PERFORMANCE_VIEW: 'performance.view',
+  DEALER_VIEW: 'dealer.view',
+  DEALER_REASSIGN: 'dealer.reassign',
+  ESCALATION_RAISE: 'escalation.raise',
   DAY_UNLOCK: 'day.unlock'
 };
 
@@ -142,8 +265,20 @@ export const EXPLICIT_PERMISSIONS_MAP = {
     'hierarchy.view',
     'team.create', 'team.edit', 'team.delete', 'team.transferMembers'
   ],
-  'Chief Sales Officer': ['hierarchy.view'],
-  'CSO': ['hierarchy.view'],
+  'Chief Sales Officer': [
+    'employee.view', 'hierarchy.view',
+    'task.view', 'task.assign', 'task.reassign', 'task.nudge',
+    'approval.review', 'performance.view',
+    'team.create', 'team.edit', 'team.delete', 'team.addMember', 'team.transferMembers',
+    'dealer.view', 'dealer.reassign', 'escalation.raise'
+  ],
+  'CSO': [
+    'employee.view', 'hierarchy.view',
+    'task.view', 'task.assign', 'task.reassign', 'task.nudge',
+    'approval.review', 'performance.view',
+    'team.create', 'team.edit', 'team.delete', 'team.addMember', 'team.transferMembers',
+    'dealer.view', 'dealer.reassign', 'escalation.raise'
+  ],
   'Accounts Manager': ['hierarchy.view'],
   'Brand Manager': ['hierarchy.view']
 };
@@ -331,7 +466,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     scope: SCOPES.DOWNLINE,
     performanceScope: SCOPES.DOWNLINE,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.DASHBOARD, PAGES.BOOKINGS, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
       PAGES.TODOS, PAGES.TEAMS
     ],
     canAssign: true,
@@ -343,7 +478,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     scope: SCOPES.DOWNLINE,
     performanceScope: SCOPES.DOWNLINE,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.DASHBOARD, PAGES.BOOKINGS, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
       PAGES.TODOS, PAGES.TEAMS
     ],
     canAssign: true,
@@ -367,7 +502,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     scope: SCOPES.DOWNLINE,
     performanceScope: SCOPES.DOWNLINE,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.DASHBOARD, PAGES.BOOKINGS, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
       PAGES.TODOS, PAGES.TEAMS
     ],
     canAssign: true,
@@ -381,7 +516,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     scope: SCOPES.DOWNLINE,
     performanceScope: SCOPES.DOWNLINE,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.DASHBOARD, PAGES.BOOKINGS, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
       PAGES.TODOS, PAGES.TEAMS
     ],
     canAssign: true,
@@ -393,7 +528,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     scope: SCOPES.DOWNLINE,
     performanceScope: SCOPES.DOWNLINE,
     menu: [
-      PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
+      PAGES.DASHBOARD, PAGES.BOOKINGS, PAGES.TEAM_PERFORMANCE, PAGES.APPROVALS, PAGES.MY_TASKS,
       PAGES.TODOS, PAGES.TEAMS
     ],
     canAssign: true,
@@ -441,7 +576,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     scope: SCOPES.SELF,
     performanceScope: null,
     menu: [
-      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS
+      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS, PAGES.BOOKINGS
     ],
     canAssign: false,
     canApprove: false,
@@ -482,7 +617,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     ],
     canAssign: true,
     canApprove: true,
-    canManageTeams: false,
+    canManageTeams: true,
     canManageEmployees: false
   },
   'CSO': {
@@ -495,7 +630,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     ],
     canAssign: true,
     canApprove: true,
-    canManageTeams: false,
+    canManageTeams: true,
     canManageEmployees: false
   },
   'State Sales Manager': {
@@ -614,7 +749,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     menu: [
       PAGES.DASHBOARD, PAGES.TEAM_PERFORMANCE, PAGES.ALL_TASKS, PAGES.MY_TASKS,
       PAGES.APPROVALS, PAGES.ESCALATIONS, PAGES.TODOS, PAGES.TEAMS,
-      PAGES.REPORTS
+      PAGES.BOOKINGS, PAGES.REPORTS
     ],
     canAssign: true,
     canApprove: true,
@@ -625,7 +760,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     scope: SCOPES.SELF,
     performanceScope: null,
     menu: [
-      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS
+      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS, PAGES.BOOKINGS
     ],
     canAssign: false,
     canApprove: false,
@@ -636,7 +771,7 @@ export const ROLE_PERMISSIONS_CONFIG = {
     scope: SCOPES.SELF,
     performanceScope: null,
     menu: [
-      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS
+      PAGES.DASHBOARD, PAGES.MY_TASKS, PAGES.TODOS, PAGES.TEAMS, PAGES.BOOKINGS
     ],
     canAssign: false,
     canApprove: false,
@@ -732,7 +867,8 @@ export function canAccess(user, page) {
   // Map tab variations
   let target = page;
   if (page === 'assigned_tasks' || page === PAGES.ASSIGNED_TASKS) {
-    return Boolean(config.canAssign);
+    if (user.canAssignTask === false) return false;
+    return user.canAssignTask === true || Boolean(config.canAssign);
   }
   if (page === 'my_tasks' || page === 'all_tasks') {
     if (page === 'all_tasks') return config.menu.includes(PAGES.ALL_TASKS);
@@ -759,16 +895,16 @@ export function canAccess(user, page) {
 export function getOperationsBranchRoles(role) {
   const norm = normalizeRoleName(role);
   if (norm === 'Warehouse In-charge') {
-    return ['Warehouse Supervisor', 'Loading Staff'];
+    return ['Warehouse Supervisor', 'Warehouse Executive', 'Loading Staff'];
   }
   if (norm === 'Warehouse Supervisor') {
     return ['Loading Staff'];
   }
   if (norm === 'Transport Manager') {
-    return ['Transport Coordinator', 'Driver'];
+    return ['Transport Coordinator', 'Driver', 'Delivery Partner'];
   }
   if (norm === 'Transport Coordinator') {
-    return ['Driver'];
+    return ['Driver', 'Delivery Partner'];
   }
   if (norm === 'Service Manager') {
     return ['Service Coordinator', 'Technician'];
@@ -831,13 +967,9 @@ export function getVisibleUserIds(user, allEmployees = []) {
   }
 
   if (scope === SCOPES.DEPARTMENT) {
-    // CSO sees all employees across all Sales hierarchy
+    // CSO sees all employees in the Sales Department (entire department scope)
     if (userRole === 'CSO') {
-      const salesEmployees = allEmployees.filter(e => {
-        const d = (e.department || e.departmentId || '').toLowerCase();
-        const r = normalizeRoleName(e.role || '');
-        return d === 'sales' || ['SSM', 'ASM', 'Sales Coordinator'].includes(r);
-      });
+      const salesEmployees = allEmployees.filter(e => isInSalesDepartment(e));
       const ids = salesEmployees.map(e => String(e.id || e.uid || e.employeeId));
       if (myId && !ids.includes(myId)) ids.push(myId);
       return ids;
@@ -981,11 +1113,7 @@ export function getPerformanceVisibleEmployees(user, allEmployees = []) {
     }
 
     if (userRole === 'CSO') {
-      return allEmployees.filter(e => {
-        const d = (e.department || e.departmentId || '').toLowerCase();
-        const r = normalizeRoleName(e.role || '');
-        return d === 'sales' || ['SSM', 'ASM', 'Sales Coordinator'].includes(r);
-      });
+      return allEmployees.filter(e => isInSalesDepartment(e));
     }
 
     if (userRole === 'Brand Manager') {
@@ -1139,6 +1267,48 @@ export function can(user, permission, target = null) {
   const targetId = target ? String(target.id || target.uid || target.employeeId || '') : '';
   const isSelf = myId && targetId && myId === targetId;
 
+  // --- CSO ENTIRE SALES DEPARTMENT RULES ---
+  if (isSalesHead(user)) {
+    // 1. Cannot unlock days
+    if (permission === PERMISSIONS.DAY_UNLOCK) {
+      return false;
+    }
+
+    // 2. Cannot add, edit, import, deactivate or reset passwords for employees
+    if ([
+      PERMISSIONS.EMPLOYEE_CREATE, PERMISSIONS.EMPLOYEE_EDIT, PERMISSIONS.EMPLOYEE_IMPORT,
+      PERMISSIONS.EMPLOYEE_DEACTIVATE, PERMISSIONS.EMPLOYEE_ACTIVATE, PERMISSIONS.EMPLOYEE_RESET_PASSWORD
+    ].includes(permission)) {
+      return false;
+    }
+
+    // 3. Cannot approve own tasks
+    if (permission === PERMISSIONS.APPROVAL_REVIEW && target) {
+      const taskAssigneeId = String(target.assignedToId || target.assigneeId || '');
+      const taskCreatorId = String(target.createdById || target.creatorId || '');
+      if (taskAssigneeId === myId || taskCreatorId === myId) {
+        return false;
+      }
+    }
+
+    // 4. For any target employee or task, target MUST belong to Sales
+    if (target) {
+      // Team permission check
+      if (permission.startsWith('team.')) {
+        const teamDept = (target.departmentId || target.department || '').toLowerCase();
+        if (teamDept && teamDept !== 'sales') {
+          return false;
+        }
+      } else {
+        // Employee or task target check
+        const isSales = isInSalesDepartment(target);
+        if (!isSales) {
+          return false;
+        }
+      }
+    }
+  }
+
   // Rule 1a: Cannot change their own role, level or designation
   if (permission === PERMISSIONS.EMPLOYEE_EDIT && isSelf && target) {
     if (target.isRoleChange || target.roleChanged || target.newRole || target.newLevel || target.newDesignation) {
@@ -1205,8 +1375,11 @@ export function canManageTeam(user, team = null) {
 
 export function canUserAssignTo(assigner, assignee, allEmployees = [], teamMembers = []) {
   if (!assigner || !assignee) return false;
+  // If HR has explicitly toggled or assigned permission on the user profile, respect that override
+  if (assigner.canAssignTask === false) return false;
   const config = getRoleConfig(assigner);
-  if (!config || !config.canAssign) return false;
+  const canAssign = assigner.canAssignTask === true || Boolean(config?.canAssign);
+  if (!canAssign) return false;
 
   const assignerId = String(assigner.id || assigner.uid || assigner.employeeId || '');
   const assigneeId = String(assignee.id || assignee.uid || assignee.employeeId || '');
@@ -1225,9 +1398,14 @@ export function canUserAssignTo(assigner, assignee, allEmployees = [], teamMembe
 
   const roleNorm = normalizeRoleName(assigner.role || '');
 
-  // 1. Universal roles & CSO can assign to ANYONE who they want
-  if (roleNorm === 'CSO' || roleNorm === 'Director Operations' || roleNorm === 'Executive Director') {
+  // 1. Universal roles (Executive Director & Director Operations) can assign to ANYONE
+  if (roleNorm === 'Director Operations' || roleNorm === 'Executive Director') {
     return true;
+  }
+
+  // 1b. CSO (Chief Sales Officer): CAN ASSIGN TO ANY SALES EMPLOYEE (entire Sales department)
+  if (roleNorm === 'CSO') {
+    return isInSalesDepartment(assignee);
   }
 
   // 2. Operations Head can assign to anyone in Operations
@@ -1251,8 +1429,11 @@ export function canUserAssignTo(assigner, assignee, allEmployees = [], teamMembe
 
 export function getAssignableEmployees(user, allEmployees = [], deptFilter = null, teamMembers = []) {
   if (!user || !allEmployees) return [];
+  // If HR has explicitly toggled canAssignTask off, disallow assigning
+  if (user.canAssignTask === false) return [];
   const config = getRoleConfig(user);
-  if (!config || !config.canAssign) return [];
+  const canAssign = user.canAssignTask === true || Boolean(config?.canAssign);
+  if (!canAssign) return [];
 
   const myId = String(user.id || user.uid || user.employeeId);
   const roleNorm = normalizeRoleName(user.role || '');
@@ -1268,8 +1449,8 @@ export function getAssignableEmployees(user, allEmployees = [], deptFilter = nul
     });
   }
 
-  // Top Universal Leadership & CSO
-  if (roleNorm === 'CSO' || roleNorm === 'Director Operations' || roleNorm === 'Executive Director') {
+  // Top Universal Leadership (Executive Director, Director Operations)
+  if (roleNorm === 'Director Operations' || roleNorm === 'Executive Director') {
     return allEmployees.filter(e => {
       const id = String(e.id || e.uid || e.employeeId);
       if (id === myId) return false;
@@ -1278,6 +1459,15 @@ export function getAssignableEmployees(user, allEmployees = [], deptFilter = nul
         return d.includes(deptFilter.toLowerCase());
       }
       return true;
+    });
+  }
+
+  // CSO: ALL employees in the Sales Department (whether in direct chain or not)
+  if (roleNorm === 'CSO') {
+    return allEmployees.filter(e => {
+      const id = String(e.id || e.uid || e.employeeId);
+      if (id === myId) return false;
+      return isInSalesDepartment(e);
     });
   }
 

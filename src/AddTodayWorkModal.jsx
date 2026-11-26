@@ -2,13 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   PlusCircle, X, Loader2, Calendar, Clock, AlertCircle, 
   Building2, CheckCircle2, Link2, Paperclip, Upload, FileText, Image, Video,
-  MapPin, Camera, CheckSquare, CreditCard, DollarSign
+  MapPin, Camera, CheckSquare, CreditCard, DollarSign, Lock
 } from 'lucide-react';
 import { TASK_STATUSES, TASK_PRIORITIES } from './rbac';
-import { getTodayDateString, getDateOffset } from './dateUtils';
-import { db } from './firebase';
-import { collection, addDoc } from 'firebase/firestore';
-import { uploadTaskAttachment } from './firestoreService';
+import { getTodayDateString, isDailyWorkLogLocked, isTodayLogWindowOpen } from './dateUtils';
+import { uploadTaskAttachment, createFirestoreTask } from './firestoreService';
 import { canAccessSales, filterDealersByScope } from './salesPermissions';
 import { normalizeRoleName } from './permissions';
 
@@ -50,7 +48,6 @@ export default function AddTodayWorkModal({
   onTaskCreated
 }) {
   const todayStr = getTodayDateString();
-  const yesterdayStr = getDateOffset(-1);
   const titleInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const photoInputRef = useRef(null);
@@ -80,14 +77,15 @@ export default function AddTodayWorkModal({
   const scopedDealers = isSales ? filterDealersByScope(dealers, currentUser) : [];
 
   // Form states
-  const [selectedTaskDate, setSelectedTaskDate] = useState(todayStr);
-  const [yesterdayLateReason, setYesterdayLateReason] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState(TASK_STATUSES.ASSIGNED);
   const [priority, setPriority] = useState(TASK_PRIORITIES.MEDIUM);
   const [selectedDealerName, setSelectedDealerName] = useState('');
   const [linkedBookingId, setLinkedBookingId] = useState('');
+
+  // Daily cutoff lock check
+  const isCutoffLocked = isDailyWorkLogLocked(todayStr);
 
   // Finance-specific fields
   const [financeTaskType, setFinanceTaskType] = useState('Payment verification');
@@ -119,8 +117,6 @@ export default function AddTodayWorkModal({
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedTaskDate(todayStr);
-      setYesterdayLateReason('');
       setTitle('');
       setDescription('');
       setStatus(TASK_STATUSES.ASSIGNED);
@@ -244,13 +240,13 @@ export default function AddTodayWorkModal({
     e.preventDefault();
     setErrorMessage('');
 
-    if (!title.trim()) {
-      setErrorMessage('Task Title is required.');
+    if (isCutoffLocked) {
+      setErrorMessage("Today's work log is locked. Entries can no longer be modified.");
       return;
     }
 
-    if (selectedTaskDate === yesterdayStr && !yesterdayLateReason.trim()) {
-      setErrorMessage("Mandatory: Please provide a reason why yesterday's work was not logged yesterday.");
+    if (!title.trim()) {
+      setErrorMessage('Task Title is required.');
       return;
     }
 
@@ -265,7 +261,7 @@ export default function AddTodayWorkModal({
     };
 
     const finalDept = userDept || (isFinance ? 'finance' : isMarketing ? 'marketing' : 'operations');
-    const effectiveDate = selectedTaskDate || todayStr;
+    const effectiveDate = todayStr;
 
     const newTask = {
       title: title.trim(),
@@ -293,8 +289,7 @@ export default function AddTodayWorkModal({
       createdByRole: currentUser?.role || 'Staff',
 
       selfLogged: true,
-      isYesterdayLateSubmission: effectiveDate === yesterdayStr,
-      yesterdayLateReason: effectiveDate === yesterdayStr ? yesterdayLateReason.trim() : null,
+      isWorkLog: true,
 
       // Finance fields
       taskType: isFinance ? financeTaskType : isOperations ? opTaskType : isMarketing ? taskType : null,
@@ -328,7 +323,7 @@ export default function AddTodayWorkModal({
     };
 
     try {
-      const docRef = await addDoc(collection(db, 'tasks'), newTask);
+      const taskId = await createFirestoreTask(newTask, currentUser);
       onClose();
     } catch (err) {
       console.error('Error saving self-logged task:', err);
@@ -350,8 +345,14 @@ export default function AddTodayWorkModal({
                 <PlusCircle className="w-5 h-5 text-emerald-700" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  {selectedTaskDate === yesterdayStr ? "Add Yesterday's Work" : "Add Today's Work"}
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <span>Add Today's Work</span>
+                  {isCutoffLocked && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                      <Lock className="w-3 h-3" />
+                      Locked
+                    </span>
+                  )}
                 </h2>
                 <p className="text-xs text-slate-500">
                   Logging work for: <span className="font-semibold text-slate-800">{currentUser?.fullName || currentUser?.name}</span>
@@ -376,65 +377,20 @@ export default function AddTodayWorkModal({
               </div>
             )}
 
-            {/* Date Selector: Today vs Yesterday */}
-            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-700 flex items-center gap-1.5 text-xs">
-                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Logging Work For Date</span>
-                </span>
-                <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                  {selectedTaskDate === todayStr ? 'Today' : 'Yesterday'} ({selectedTaskDate})
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setSelectedTaskDate(todayStr)}
-                  className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition min-h-[40px] cursor-pointer ${
-                    selectedTaskDate === todayStr
-                      ? 'bg-[#05331F] text-white shadow-xs'
-                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <CheckCircle2 className={`w-3.5 h-3.5 ${selectedTaskDate === todayStr ? 'text-emerald-400' : 'text-slate-400'}`} />
-                  <span>Today ({todayStr})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedTaskDate(yesterdayStr)}
-                  className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition min-h-[40px] cursor-pointer ${
-                    selectedTaskDate === yesterdayStr
-                      ? 'bg-[#05331F] text-white shadow-xs'
-                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <Clock className={`w-3.5 h-3.5 ${selectedTaskDate === yesterdayStr ? 'text-emerald-400' : 'text-slate-400'}`} />
-                  <span>Yesterday ({yesterdayStr})</span>
-                </button>
-              </div>
-              {selectedTaskDate === yesterdayStr && (
-                <div className="space-y-2 pt-1">
-                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 space-y-1.5">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900">
-                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>Reason for Missed Yesterday Log (Mandatory) *</span>
-                    </div>
-                    <p className="text-[11px] text-amber-800 leading-relaxed">
-                      Company policy strictly requires daily work to be logged before <strong>11:59 PM</strong> on the day of work. Because yesterday's logging deadline passed, you cannot log regular retrospective work without recording an authorized mandatory reason.
-                    </p>
-                    <textarea
-                      rows="2"
-                      required
-                      placeholder="Explain why yesterday's work was not logged before 11:59 PM (e.g. Field travel without internet, client emergency, power outage)..."
-                      value={yesterdayLateReason}
-                      onChange={(e) => setYesterdayLateReason(e.target.value)}
-                      className="w-full mt-1.5 p-2.5 bg-white border border-amber-400 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
-                    />
-                  </div>
+            {/* Daily Lock Cutoff Notice */}
+            {isCutoffLocked ? (
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 space-y-1">
+                <div className="flex items-center gap-2 font-bold text-xs text-rose-900">
+                  <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>Daily Work Log Locked</span>
                 </div>
-              )}
-            </div>
+                <p className="text-[11px] text-rose-700 leading-relaxed">
+                  Today's work log is locked. Entries can no longer be modified. The daily logging window closed at 11:59 PM. You will be able to log new entries when the next business day begins.
+                </p>
+              </div>
+            ) : null}
+
+         
 
             {/* FINANCE & ACCOUNTS SPECIFIC FIELDS */}
             {isFinance && (
@@ -770,13 +726,13 @@ export default function AddTodayWorkModal({
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting || isPhotoUploading || isUploading || isFinanceUploading}
+                disabled={isCutoffLocked || isSubmitting || isPhotoUploading || isUploading || isFinanceUploading}
                 className="px-5 py-2.5 rounded-xl bg-[#05331F] hover:bg-[#07472B] text-white font-semibold shadow-xs transition disabled:opacity-50 min-h-[44px]"
               >
                 {isSubmitting 
                   ? 'Saving...' 
-                  : selectedTaskDate === yesterdayStr 
-                  ? "Add Yesterday's Work" 
+                  : isCutoffLocked 
+                  ? "Today's Work Log Locked" 
                   : "Add Today's Work"}
               </button>
             </div>

@@ -69,67 +69,11 @@ const MARKETING_DELEGATION_TEMPLATES = [
   }
 ];
 
-const FINANCE_DELEGATION_TEMPLATES = [
-  {
-    title: 'Verify payment token',
-    taskType: 'Payment verification',
-    description: 'Verify advance payment token/credit clearance against bank statement or payment slip.',
-    priority: TASK_PRIORITIES.HIGH
-  },
-  {
-    title: 'Reconcile bank statement',
-    taskType: 'Reconciliation',
-    description: 'Reconcile daily bank ledger receipts with pending sales orders and bank credits.',
-    priority: TASK_PRIORITIES.HIGH
-  },
-  {
-    title: 'Follow up dealer payment',
-    taskType: 'Collection follow-up',
-    description: 'Contact dealer accounts desk for outstanding payment collection on completed door dispatches.',
-    priority: TASK_PRIORITIES.MEDIUM
-  },
-  {
-    title: 'Prepare invoice',
-    taskType: 'Invoice',
-    description: 'Generate and verify tax invoice for dispatched door consignments.',
-    priority: TASK_PRIORITIES.MEDIUM
-  },
-  {
-    title: 'Month-end report',
-    taskType: 'Reporting',
-    description: 'Consolidate month-end finance reconciliation and clearance summary for management review.',
-    priority: TASK_PRIORITIES.MEDIUM
-  }
-];
-
-const OPERATIONS_BRANCH_TEMPLATES = {
-  warehouse: [
-    { title: 'Pick doors for order', taskType: 'Picking', description: 'Retrieve required door models, sizes, and lock pre-sets from racks and inspect packaging.', priority: TASK_PRIORITIES.HIGH },
-    { title: 'Stage for loading', taskType: 'Loading', description: 'Move checked doors to staging lane at Dispatch Bay. Verify count against dispatch sheet.', priority: TASK_PRIORITIES.HIGH },
-    { title: 'Load vehicle', taskType: 'Loading', description: 'Safely stack doors onto transport vehicle with protective foams and strapping.', priority: TASK_PRIORITIES.URGENT }
-  ],
-  transport: [
-    { title: 'Dispatch vehicle', taskType: 'Dispatch', description: 'Hand over gate pass, bill of lading and vehicle trip sheet for immediate departure.', priority: TASK_PRIORITIES.HIGH },
-    { title: 'Deliver to dealer', taskType: 'Delivery', description: 'Unload doors at destination showroom/godown, verify damage-free arrival and collect signed POD.', priority: TASK_PRIORITIES.HIGH },
-    { title: 'Return empty vehicle', taskType: 'Other', description: 'Vehicle transit return to factory yard after delivery completion with signed documents.', priority: TASK_PRIORITIES.LOW }
-  ],
-  service: [
-    { title: 'Site visit', taskType: 'Service call', description: 'Visit customer residence or site to inspect frame dimensions and lock fitting feasibility.', priority: TASK_PRIORITIES.MEDIUM },
-    { title: 'Repair door', taskType: 'Service call', description: 'Inspect reported hinge misalignment, lock cylinder issue or surface scuff. Perform on-site fix.', priority: TASK_PRIORITIES.HIGH },
-    { title: 'Installation check', taskType: 'Service call', description: 'Verify proper plumb, level, anchor bolt torque and smooth latch engagement post-installation.', priority: TASK_PRIORITIES.MEDIUM }
-  ],
-  inventory: [
-    { title: 'Stock count', taskType: 'Stock check', description: 'Cycle count physical steel door inventory in warehouse and reconcile against master sheet.', priority: TASK_PRIORITIES.MEDIUM },
-    { title: 'Receive material', taskType: 'Other', description: 'Unload raw sheet metal or hardware accessory consignments, inspect against packing list.', priority: TASK_PRIORITIES.HIGH },
-    { title: 'Reorder check', taskType: 'Stock check', description: 'Review minimum threshold levels for high-runner finishes (Walnut, Teak) and trigger PO.', priority: TASK_PRIORITIES.MEDIUM }
-  ]
-};
-
 const OPERATIONS_BRANCHES = [
-  { id: 'warehouse', name: 'Warehouse', headRole: 'Warehouse In-charge', managerEmail: 'suhaib@starkdoors.com' },
-  { id: 'transportation', name: 'Transportation', headRole: 'Transport Manager', managerEmail: 'nayan.ram@starkdoors.com' },
-  { id: 'service', name: 'Service', headRole: 'Service Manager', managerEmail: 'amal.kumar@starkdoors.com' },
-  { id: 'inventory', name: 'Inventory', headRole: 'Inventory Supervisor', managerEmail: 'tobin@starkdoors.com' }
+  { id: 'warehouse', name: 'Warehouse', headRole: 'Warehouse In-charge' },
+  { id: 'transportation', name: 'Transportation', headRole: 'Transport Manager' },
+  { id: 'service', name: 'Service', headRole: 'Service Manager' },
+  { id: 'inventory', name: 'Inventory', headRole: 'Inventory Supervisor' }
 ];
 
 export default function TaskAssignmentModal({ 
@@ -276,11 +220,7 @@ export default function TaskAssignmentModal({
     }
 
     if (isGlobalManager) {
-      if (selectedDept === 'all') return employees;
-      return employees.filter(e => {
-        const dept = (e.department || '').toLowerCase();
-        return dept.includes(selectedDept.toLowerCase());
-      });
+      return getAssignableEmployees(currentUser, employees, selectedDept, teamMembers);
     }
 
     if (isSales) {
@@ -340,15 +280,6 @@ export default function TaskAssignmentModal({
     } else {
       setAssignEntireTeam(true);
       setAssignedToIds(filteredEmployees.map(e => e.id || e.uid));
-    }
-  };
-
-  const applyQuickTemplate = (template) => {
-    setTitle(template.title);
-    setDescription(template.description);
-    setPriority(template.priority);
-    if (template.taskType) {
-      setOpTaskType(template.taskType);
     }
   };
 
@@ -738,103 +669,24 @@ export default function TaskAssignmentModal({
           {/* MODE: STANDARD DOWNLINE ASSIGNMENT */}
           {assignmentMode === 'assign' && (
             <>
-              {/* Finance Quick Templates */}
-              {isFinanceRole && isAccountsManager && (
-                <div>
-                  <label className="font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Quick Finance Templates</span>
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {FINANCE_DELEGATION_TEMPLATES.map((tpl, i) => (
-                      <button
-                        key={`fin-${i}`}
-                        type="button"
-                        onClick={() => applyQuickTemplate(tpl)}
-                        className="p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition"
-                      >
-                        <p className="font-semibold text-slate-800 text-[11px] truncate">{tpl.title}</p>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">{tpl.taskType}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Branch Quick Templates */}
-              {isOperationsRole && (
-                <div>
-                  <label className="font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Quick Operations Templates</span>
-                  </label>
-                  
-                  {/* Select templates according to branch */}
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {(isWarehouseInCharge || isWarehouseSupervisor || isOperationsHead) && OPERATIONS_BRANCH_TEMPLATES.warehouse.map((tpl, i) => (
-                      <button
-                        key={`wh-${i}`}
-                        type="button"
-                        onClick={() => applyQuickTemplate(tpl)}
-                        className="p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition"
-                      >
-                        <p className="font-semibold text-slate-800 text-[11px] truncate">{tpl.title}</p>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">Warehouse</p>
-                      </button>
-                    ))}
-
-                    {(isTransportManager || isTransportCoordinator || isOperationsHead) && OPERATIONS_BRANCH_TEMPLATES.transport.map((tpl, i) => (
-                      <button
-                        key={`tr-${i}`}
-                        type="button"
-                        onClick={() => applyQuickTemplate(tpl)}
-                        className="p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition"
-                      >
-                        <p className="font-semibold text-slate-800 text-[11px] truncate">{tpl.title}</p>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">Transport</p>
-                      </button>
-                    ))}
-
-                    {(isServiceManager || isServiceCoordinator || isOperationsHead) && OPERATIONS_BRANCH_TEMPLATES.service.map((tpl, i) => (
-                      <button
-                        key={`srv-${i}`}
-                        type="button"
-                        onClick={() => applyQuickTemplate(tpl)}
-                        className="p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition"
-                      >
-                        <p className="font-semibold text-slate-800 text-[11px] truncate">{tpl.title}</p>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">Service</p>
-                      </button>
-                    ))}
-
-                    {(isInventorySupervisor || isOperationsHead) && OPERATIONS_BRANCH_TEMPLATES.inventory.map((tpl, i) => (
-                      <button
-                        key={`inv-${i}`}
-                        type="button"
-                        onClick={() => applyQuickTemplate(tpl)}
-                        className="p-2 rounded-xl bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 text-left transition"
-                      >
-                        <p className="font-semibold text-slate-800 text-[11px] truncate">{tpl.title}</p>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">Inventory</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Downline Assignee Selector */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="font-semibold text-slate-700">
-                    Downline Assignee(s) ({assignedToIds.length} selected)
+                    Assigned Downline Member(s) ({assignedToIds.length} selected)
                   </label>
-                  <button
-                    type="button"
-                    onClick={toggleSelectAll}
-                    className="text-[11px] font-semibold text-[#05331F] hover:underline"
-                  >
-                    {assignEntireTeam ? 'Deselect All' : 'Select All Downline'}
-                  </button>
+                  {assignedToIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssignEntireTeam(false);
+                        setAssignedToIds([]);
+                      }}
+                      className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 hover:underline"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
                 </div>
 
                 <div className="relative mb-2">

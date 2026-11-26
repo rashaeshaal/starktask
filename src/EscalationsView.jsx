@@ -36,8 +36,9 @@ export default function EscalationsView({
 
   // Extract real incidents from task blockers, overdue statuses, and payment holds
   const incidentList = [];
+  const seenIncidentKeys = new Set();
 
-  tasks.forEach(task => {
+  tasks.forEach((task, taskIdx) => {
     const taskDept = (task.departmentId || task.department || 'operations').toLowerCase();
 
     // If viewer is Operations Head, restrict escalations strictly to Operations branches (plus any payment holds affecting picking)
@@ -54,69 +55,82 @@ export default function EscalationsView({
     const ageDays = Math.max(1, Math.ceil((new Date() - new Date(taskDate)) / (1000 * 60 * 60 * 24)));
 
     // 1. Operational Blockers
-    if (task.status === 'Blocked' || task.status === 'Operational Blocker') {
-      incidentList.push({
-        id: `esc-blk-${task.id}`,
-        taskId: task.id,
-        rawTask: task,
-        taskTitle: task.title,
-        department: task.departmentName || task.department || 'Operations',
-        departmentId: task.departmentId || 'operations',
-        responsibleEmployee: task.assignedToName || 'Unassigned',
-        responsibleEmployeeId: task.assignedToId || task.assignedTo,
-        issue: task.blockerReason || 'Operational Blocker Reported',
-        severity: 'Critical',
-        ageDays,
-        deadline: `${task.deadlineDate || ''} ${task.deadlineTime || ''}`,
-        escalationLevel: isOperationsHead ? 'Operations Head' : 'Director Operations',
-        status: task.isResolved ? 'Resolved' : 'Active Escalation',
-        reason: task.description || 'Task execution stopped due to operational impediment',
-        timestamp: task.lastUpdated || task.createdAt
-      });
+    if (task.status === 'Blocked' || task.status === 'Operational Blocker' || task.isBlocked) {
+      const incKey = `esc-blk-${task.id}`;
+      if (!seenIncidentKeys.has(incKey)) {
+        seenIncidentKeys.add(incKey);
+        incidentList.push({
+          id: incKey,
+          taskId: task.id,
+          rawTask: task,
+          taskTitle: task.title,
+          department: task.departmentName || task.department || 'Operations',
+          departmentId: task.departmentId || 'operations',
+          responsibleEmployee: task.assignedToName || 'Unassigned',
+          responsibleEmployeeId: task.assignedToId || task.assignedTo,
+          blockerCategory: task.blockerCategory || 'Operational Impediment',
+          issue: task.blockerReason || task.blockerCategory || 'Operational Blocker Reported',
+          severity: task.blockerSeverity || 'Critical',
+          ageDays,
+          deadline: `${task.deadlineDate || ''} ${task.deadlineTime || ''}`,
+          escalationLevel: isOperationsHead ? 'Operations Head' : 'Director Operations',
+          status: task.isResolved ? 'Resolved' : 'Active Escalation',
+          reason: task.description || 'Task execution stopped due to operational impediment',
+          timestamp: task.lastUpdated || task.createdAt
+        });
+      }
     }
 
     // 2. Overdue tasks
     if (task.deadlineDate && task.deadlineDate < today && task.status !== 'Completed') {
-      incidentList.push({
-        id: `esc-ovd-${task.id}`,
-        taskId: task.id,
-        rawTask: task,
-        taskTitle: task.title,
-        department: task.departmentName || task.department || 'Operations',
-        departmentId: task.departmentId || 'operations',
-        responsibleEmployee: task.assignedToName || 'Unassigned',
-        responsibleEmployeeId: task.assignedToId || task.assignedTo,
-        issue: `Task Overdue by ${ageDays} days`,
-        severity: task.priority === 'Critical' || task.priority === 'Urgent' ? 'Critical' : 'High',
-        ageDays,
-        deadline: `${task.deadlineDate} ${task.deadlineTime || '6:00 PM'}`,
-        escalationLevel: isOperationsHead ? 'Operations Head' : 'Director Operations',
-        status: 'Active Escalation',
-        reason: `Target deadline missed. Requires supervisor follow-up.`,
-        timestamp: task.lastUpdated || task.createdAt
-      });
+      const incKey = `esc-ovd-${task.id}`;
+      if (!seenIncidentKeys.has(incKey)) {
+        seenIncidentKeys.add(incKey);
+        incidentList.push({
+          id: incKey,
+          taskId: task.id,
+          rawTask: task,
+          taskTitle: task.title,
+          department: task.departmentName || task.department || 'Operations',
+          departmentId: task.departmentId || 'operations',
+          responsibleEmployee: task.assignedToName || 'Unassigned',
+          responsibleEmployeeId: task.assignedToId || task.assignedTo,
+          issue: `Task Overdue by ${ageDays} days`,
+          severity: task.priority === 'Critical' || task.priority === 'Urgent' ? 'Critical' : 'High',
+          ageDays,
+          deadline: `${task.deadlineDate} ${task.deadlineTime || '6:00 PM'}`,
+          escalationLevel: isOperationsHead ? 'Operations Head' : 'Director Operations',
+          status: 'Active Escalation',
+          reason: `Target deadline missed. Requires supervisor follow-up.`,
+          timestamp: task.lastUpdated || task.createdAt
+        });
+      }
     }
 
     // 3. Payment Holds (visible to Director Operations, Operations Head, and Accounts Manager)
     if (task.paymentStatus === 'Payment Hold' || task.accountsClearance === 'Payment Hold') {
-      incidentList.push({
-        id: `esc-pay-${task.id}`,
-        taskId: task.id,
-        rawTask: task,
-        taskTitle: task.title,
-        department: 'Finance & Accounts',
-        departmentId: 'finance',
-        responsibleEmployee: task.assignedToName || 'Accounts Manager',
-        responsibleEmployeeId: task.assignedToId || task.assignedTo,
-        issue: `PAYMENT HOLD: ${task.holdReason || 'Advance token unpaid. Warehouse Picking Disallowed.'}`,
-        severity: 'Critical',
-        ageDays,
-        deadline: `${task.deadlineDate || today} 12:00 PM`,
-        escalationLevel: isAccountsManager ? 'Accounts Manager' : isOperationsHead ? 'Operations Head' : 'Director Operations',
-        status: 'Active Escalation',
-        reason: task.holdReason || 'Advance token or credit ledger unpaid. Disallow dispatch.',
-        timestamp: task.lastUpdated || task.createdAt
-      });
+      const incKey = `esc-pay-${task.id}`;
+      if (!seenIncidentKeys.has(incKey)) {
+        seenIncidentKeys.add(incKey);
+        incidentList.push({
+          id: incKey,
+          taskId: task.id,
+          rawTask: task,
+          taskTitle: task.title,
+          department: 'Finance & Accounts',
+          departmentId: 'finance',
+          responsibleEmployee: task.assignedToName || 'Accounts Manager',
+          responsibleEmployeeId: task.assignedToId || task.assignedTo,
+          issue: `PAYMENT HOLD: ${task.holdReason || 'Advance token unpaid. Warehouse Picking Disallowed.'}`,
+          severity: 'Critical',
+          ageDays,
+          deadline: `${task.deadlineDate || today} 12:00 PM`,
+          escalationLevel: isAccountsManager ? 'Accounts Manager' : isOperationsHead ? 'Operations Head' : 'Director Operations',
+          status: 'Active Escalation',
+          reason: task.holdReason || 'Advance token or credit ledger unpaid. Disallow dispatch.',
+          timestamp: task.lastUpdated || task.createdAt
+        });
+      }
     }
   });
 

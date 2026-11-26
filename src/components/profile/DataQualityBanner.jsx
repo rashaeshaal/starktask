@@ -21,6 +21,18 @@ export default function DataQualityBanner({ employee, onEdit, canEdit = false })
     }
   }
 
+  // Safety check: CSO must report directly to Director Operations (emp_101)
+  const roleNorm = (employee.role || employee.designation || '').toLowerCase();
+  const isCSO = roleNorm === 'cso' || roleNorm === 'chief sales officer';
+  if (isCSO) {
+    const mgrId = String(employee.reportingManagerId || employee.reportsTo || '').toLowerCase();
+    const mgrName = (employee.reportingManagerName || '').toLowerCase();
+    const isUnderDirOps = mgrId === '101' || mgrId === 'emp_101' || mgrName.includes('director operations') || mgrName.includes('ihjas');
+    if (!isUnderDirOps) {
+      missingFields.push('Reporting Line Mismatch (CSO must report directly to Director Operations)');
+    }
+  }
+
   if (missingFields.length === 0) return null;
 
   return (

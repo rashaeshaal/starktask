@@ -56,7 +56,6 @@ export const ORG_TREE = {
       'HR Manager',
       'Accounts Manager',
       'Operations Head',
-      'CSO',
       'Brand Manager'
     ]
   },
@@ -149,9 +148,14 @@ export const ORG_TREE = {
   'Transport Coordinator': {
     department: 'transportation',
     level: 5,
-    children: ['Driver']
+    children: ['Driver', 'Delivery Partner']
   },
   'Driver': {
+    department: 'transportation',
+    level: 6,
+    children: []
+  },
+  'Delivery Partner': {
     department: 'transportation',
     level: 6,
     children: []

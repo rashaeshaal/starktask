@@ -51,87 +51,87 @@ export default function StatCards({ stats, rangeDays = 30, onRangeChange }) {
       </div>
 
       {/* Grid of 6 Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
         {/* Card 1: Assigned */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium">Assigned</span>
-            <Target className="w-4 h-4 text-slate-500" />
+            <span className="text-[11px] font-medium">Assigned</span>
+            <Target className="w-3.5 h-3.5 text-slate-500" />
           </div>
-          <div className="text-2xl font-bold text-slate-900">
+          <div className="text-lg sm:text-xl font-bold text-slate-900">
             {assigned}
           </div>
-          <p className="text-[11px] text-slate-500">Total in {rangeDays}d</p>
+          <p className="text-[10px] text-slate-500">Total in {rangeDays}d</p>
         </div>
 
         {/* Card 2: Completed */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-emerald-600">
-            <span className="text-xs font-medium text-slate-600">Completed</span>
-            <CheckCircle2 className="w-4 h-4" />
+            <span className="text-[11px] font-medium text-slate-600">Completed</span>
+            <CheckCircle2 className="w-3.5 h-3.5" />
           </div>
-          <div className="text-2xl font-bold text-emerald-700">
+          <div className="text-lg sm:text-xl font-bold text-emerald-700">
             {completed}
           </div>
-          <p className="text-[11px] text-slate-500">{assigned > 0 ? `${Math.round((completed / assigned) * 100)}% rate` : 'No tasks'}</p>
+          <p className="text-[10px] text-slate-500">{assigned > 0 ? `${Math.round((completed / assigned) * 100)}% rate` : 'No tasks'}</p>
         </div>
 
         {/* Card 3: Overdue */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-rose-500">
-            <span className="text-xs font-medium text-slate-600">Overdue</span>
-            <AlertTriangle className="w-4 h-4" />
+            <span className="text-[11px] font-medium text-slate-600">Overdue</span>
+            <AlertTriangle className="w-3.5 h-3.5" />
           </div>
-          <div className={`text-2xl font-bold ${overdue > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+          <div className={`text-lg sm:text-xl font-bold ${overdue > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
             {overdue}
           </div>
-          <p className="text-[11px] text-slate-500">Needs attention</p>
+          <p className="text-[10px] text-slate-500">Needs attention</p>
         </div>
 
         {/* Card 4: On-time % */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1">
+        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-0.5">
           <div className="flex items-center justify-between text-emerald-600">
-            <span className="text-xs font-medium text-slate-600">On-Time %</span>
-            <TrendingUp className="w-4 h-4 text-emerald-700" />
+            <span className="text-[11px] font-medium text-slate-600">On-Time %</span>
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-700" />
           </div>
-          <div className="text-2xl font-bold text-slate-900">
+          <div className="text-lg sm:text-xl font-bold text-slate-900">
             {onTimePercent}%
           </div>
-          <p className="text-[11px] text-slate-500">Target ≥ 90%</p>
+          <p className="text-[10px] text-slate-500">Target ≥ 90%</p>
         </div>
 
         {/* Card 5: Avg Completion vs Team */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1 col-span-2 sm:col-span-1">
+        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-0.5 col-span-2 sm:col-span-1">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium text-slate-600">Avg Speed</span>
-            <Clock className="w-4 h-4 text-slate-500" />
+            <span className="text-[11px] font-medium text-slate-600">Avg Speed</span>
+            <Clock className="w-3.5 h-3.5 text-slate-500" />
           </div>
-          <div className="text-2xl font-bold text-slate-900">
+          <div className="text-lg sm:text-xl font-bold text-slate-900">
             {avgCompletionTimeHours}h
           </div>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[10px] text-slate-500">
             <span className={isFaster ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
-              {isFaster ? `-${Math.abs(timeDiff)}h faster` : `+${timeDiff}h slower`}
+              {isFaster ? `-${Math.abs(timeDiff)}h` : `+${timeDiff}h`}
             </span> vs team ({teamAvgCompletionTimeHours}h)
           </p>
         </div>
 
         {/* Card 6: Sign-Off Streak & Missed */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-1 col-span-2 sm:col-span-2 lg:col-span-1">
+        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-0.5 col-span-2 sm:col-span-2 lg:col-span-1">
           <div className="flex items-center justify-between text-amber-600">
-            <span className="text-xs font-medium text-slate-600">Streak / Missed</span>
-            <Flame className="w-4 h-4 text-amber-500" />
+            <span className="text-[11px] font-medium text-slate-600">Streak / Missed</span>
+            <Flame className="w-3.5 h-3.5 text-amber-500" />
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900">{signOffStreak}d</span>
-            <span className="text-xs text-slate-400">streak</span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-lg sm:text-xl font-bold text-slate-900">{signOffStreak}d</span>
+            <span className="text-[10px] text-slate-400">streak</span>
             <span className="text-slate-300">|</span>
-            <span className={`text-base font-bold ${daysMissed > 0 ? 'text-rose-600' : 'text-slate-600'}`}>
+            <span className={`text-sm font-bold ${daysMissed > 0 ? 'text-rose-600' : 'text-slate-600'}`}>
               {daysMissed}d
             </span>
-            <span className="text-xs text-slate-400">missed</span>
+            <span className="text-[10px] text-slate-400">missed</span>
           </div>
-          <p className="text-[11px] text-slate-500">Consecutive sign-offs</p>
+          <p className="text-[10px] text-slate-500">Consecutive sign-offs</p>
         </div>
       </div>
     </div>

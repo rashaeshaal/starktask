@@ -176,9 +176,7 @@ async function seedCompanyMasterData() {
     systemName: "SalesDoor Enterprise",
     sopVersion: "2.0",
     timezone: "Asia/Kolkata",
-    orderCutoffTime: "11:00 AM",
     dailyTargetDoors: 70,
-    dailyCutoffTime: "23:59:59",
     initializedAt: serverTimestamp(),
     initialized: true
   }, { merge: true });

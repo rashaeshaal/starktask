@@ -382,52 +382,52 @@ export default function TeamPerformanceView({
       </div>
 
       {/* Summary Strip (Calculated dynamically over in-scope employees) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Active Execution</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
-              <Clock className="w-4 h-4" />
+            <span className="text-[11px] font-medium text-slate-500">Active Execution</span>
+            <div className="w-6 h-6 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center">
+              <Clock className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold text-slate-900 mt-2">{summaryMetrics.activeToday}</p>
-          <p className="text-[11px] text-amber-600 font-medium mt-1">Currently progressing tasks</p>
+          <p className="text-lg sm:text-xl font-bold text-slate-900 mt-1">{summaryMetrics.activeToday}</p>
+          <p className="text-[10px] text-amber-600 font-medium mt-0.5">Currently progressing tasks</p>
         </div>
 
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Not Started</span>
-            <div className="w-8 h-8 rounded-xl bg-slate-50 text-slate-600 flex items-center justify-center">
-              <Users className="w-4 h-4" />
+            <span className="text-[11px] font-medium text-slate-500">Not Started</span>
+            <div className="w-6 h-6 rounded-lg bg-slate-50 text-slate-600 flex items-center justify-center">
+              <Users className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold text-slate-900 mt-2">{summaryMetrics.notStarted}</p>
-          <p className="text-[11px] text-slate-400 mt-1">Zero tasks logged for period</p>
+          <p className="text-lg sm:text-xl font-bold text-slate-900 mt-1">{summaryMetrics.notStarted}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">Zero tasks logged for period</p>
         </div>
 
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Completed All</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4" />
+            <span className="text-[11px] font-medium text-slate-500">Completed All</span>
+            <div className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
+              <CheckCircle2 className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold text-[#10B981] mt-2">{summaryMetrics.completedToday}</p>
-          <p className="text-[11px] text-emerald-600 font-medium mt-1">100% finished tasks</p>
+          <p className="text-lg sm:text-xl font-bold text-[#10B981] mt-1">{summaryMetrics.completedToday}</p>
+          <p className="text-[10px] text-emerald-600 font-medium mt-0.5">100% finished tasks</p>
         </div>
 
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Overdue Tasks</span>
-            <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
-              <AlertTriangle className="w-4 h-4" />
+            <span className="text-[11px] font-medium text-slate-500">Overdue Tasks</span>
+            <div className="w-6 h-6 rounded-lg bg-rose-50 text-rose-700 flex items-center justify-center">
+              <AlertTriangle className="w-3.5 h-3.5" />
             </div>
           </div>
-          <p className={`text-2xl sm:text-3xl font-bold mt-2 ${summaryMetrics.totalOverdue > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+          <p className={`text-lg sm:text-xl font-bold mt-1 ${summaryMetrics.totalOverdue > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
             {summaryMetrics.totalOverdue}
           </p>
-          <p className="text-[11px] text-rose-500 font-medium mt-1">Pending past deadline</p>
+          <p className="text-[10px] text-rose-500 font-medium mt-0.5">Pending past deadline</p>
         </div>
 
       </div>

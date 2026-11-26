@@ -20,9 +20,21 @@ service cloud.firestore {
       return isCompanyHead();
     }
 
-    // Target employee is a company head
-    function isTargetCompanyHead(targetData) {
-      return targetData.role == 'Executive Director' || targetData.role == 'Director Operations';
+    // Check if daily work log is locked (11:59 PM lock: 23:59 Asia/Kolkata is 18:29 UTC)
+    // request.time is in UTC
+    function isDailyWorkLogLockedAtRequest(targetDateStr) {
+      let requestIst = request.time + duration.value(5, 'h') + duration.value(30, 'm');
+      let reqHours = requestIst.hours();
+      let reqMinutes = requestIst.minutes();
+      
+      return (targetDateStr != null) && (
+        (reqHours == 23 && reqMinutes >= 59)
+      );
+    }
+
+    function isTaskLockedByCutoff(taskData) {
+      let targetDate = taskData.taskDate != null ? taskData.taskDate : taskData.date;
+      return isDailyWorkLogLockedAtRequest(targetDate);
     }
 
     // Company Management Scope (Company Heads & HR/Admin Managers)
@@ -92,9 +104,14 @@ service cloud.firestore {
       return role == 'Operations Head';
     }
 
-    function isAccountsManager() {
+    function isSalesHead() {
       let role = getUserData().role;
-      return role == 'Accounts Manager' || role == 'Accounts Executive';
+      return role == 'Chief Sales Officer' || role == 'CSO';
+    }
+
+    // Check if a target employee belongs to the Sales Department
+    function isTargetInSales(targetData) {
+      return targetData.department == 'sales' || targetData.departmentId == 'sales';
     }
 
     // --- USERS / EMPLOYEES COLLECTION ---
@@ -139,6 +156,20 @@ service cloud.firestore {
     match /teams/{teamId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && (
+        isCompanyScope() ||
+        (isSalesHead() && (request.resource.data.departmentId == 'sales' || request.resource.data.department == 'sales')) ||
+        (isOperationsHead() && request.resource.data.departmentId == 'operations')
+      );
+      allow update: if isAuthenticated() && (
+        isCompanyScope() ||
+        (isSalesHead() && (resource.data.departmentId == 'sales' || resource.data.department == 'sales')) ||
+        (isOperationsHead() && resource.data.departmentId == 'operations')
+      );
+      allow delete: if isAuthenticated() && (
+        (isCompanyHead() && (resource.data.activeTasksCount == null || resource.data.activeTasksCount == 0)) ||
+        (isSalesHead() && (resource.data.departmentId == 'sales' || resource.data.department == 'sales') && (resource.data.activeTasksCount == null || resource.data.activeTasksCount == 0))
+      );
+    }
         canManageOrgStructure() || 
         (getUserData().role == 'Operations Head' && request.resource.data.departmentId in ['operations', 'warehouse', 'transportation', 'service', 'inventory', 'qc'])
       );
@@ -174,11 +205,11 @@ service cloud.firestore {
         isDownlineMember(resource.data.assignedToId)
       );
 
-      allow create: if isAuthenticated() && (
+      allow create: if isAuthenticated() && !isTaskLockedByCutoff(request.resource.data) && (
         isCompanyScope() ||
-        isCSO() ||
+        // CSO can ONLY assign tasks where the target is in the sales department
+        (isSalesHead() && (request.resource.data.departmentId == 'sales' || request.resource.data.department == 'sales')) ||
         isOperationsHead() ||
-        isAccountsManager() ||
         request.resource.data.createdById == request.auth.uid ||
         request.resource.data.assignedToId == request.auth.uid ||
         isDownlineMember(request.resource.data.assignedToId) ||
@@ -188,18 +219,38 @@ service cloud.firestore {
         (request.resource.data.isBranchRequest == true || request.resource.data.isLinkedSalesWork == true)
       );
       
-      // Updates (subtask completion, status change, approvals, payment clearance/hold)
-      allow update: if isAuthenticated() && (
-        isCompanyScope() ||
-        isCSO() ||
-        isOperationsHead() ||
-        isAccountsManager() ||
-        resource.data.assignedToId == request.auth.uid ||
-        resource.data.createdById == request.auth.uid ||
-        isDownlineMember(resource.data.assignedToId)
+      // Updates:
+      // 1. Approval updates: only assigned approverId, actor cannot be assignedToId or completedById, and cannot alter approverId/assignedToId/completedById in same write.
+      // 2. Regular execution/status updates: creator, assignee, or authorized scopes.
+      allow update: if isAuthenticated() && !isTaskLockedByCutoff(resource.data) && (
+        // Case A: Approval write
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasAny(['approvalStatus', 'approvedBy', 'approvedById', 'approvedAt', 'reviewNote']) &&
+          resource.data.approverId != null &&
+          request.auth.uid == resource.data.approverId &&
+          request.auth.uid != resource.data.assignedToId &&
+          (resource.data.completedById == null || request.auth.uid != resource.data.completedById) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['approverId', 'assignedToId', 'completedById'])
+        ) ||
+        // Case B: Non-approval updates
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['approvalStatus', 'approvedBy', 'approvedById', 'approvedAt', 'reviewNote']) &&
+          (
+            isCompanyScope() ||
+            (isSalesHead() && (resource.data.departmentId == 'sales' || resource.data.department == 'sales')) ||
+            isOperationsHead() ||
+            resource.data.assignedToId == request.auth.uid ||
+            resource.data.createdById == request.auth.uid ||
+            isDownlineMember(resource.data.assignedToId)
+          )
+        )
       );
 
-      allow delete: if isAuthenticated() && (isCompanyScope() || isCSO() || isOperationsHead() || isAccountsManager());
+      allow delete: if isAuthenticated() && !isTaskLockedByCutoff(resource.data) && (
+        isCompanyScope() || 
+        (isSalesHead() && (resource.data.departmentId == 'sales' || resource.data.department == 'sales')) || 
+        isOperationsHead()
+      );
     }
 
     // --- PRECOMPUTED DAILY STATS ({uid_date}) ---
@@ -253,7 +304,7 @@ service cloud.firestore {
     // --- DEALERS & DEALER BOOKINGS ---
     match /dealers/{dealerId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (isCompanyScope() || isCSO());
+      allow write: if isAuthenticated() && (isCompanyScope() || isSalesHead());
     }
 
     match /dealerBookings/{bookingId} {
@@ -261,6 +312,24 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update: if isAuthenticated();
       allow delete: if isAuthenticated() && isCompanyScope();
+    }
+
+    // --- QUOTATIONS & LOST ORDER REASONS ---
+    match /quotations/{quoteId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && isCompanyScope();
+    }
+
+    match /lostOrderReasons/{reasonId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isCompanyScope();
+    }
+
+    // --- DOOR CATALOG & MODELS MASTER DATA ---
+    match /doorCatalog/{modelId} {
+      allow read: if true;
+      allow write: if isAuthenticated() && (isCompanyScope() || isCompanyHead());
     }
   }
 }
